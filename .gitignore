@@ -1,0 +1,6 @@
+# Created by .ignore support plugin (hsz.mobi)
+/target/
+/cia_material.iml
+/.idea/
+/metastore_db/
+/derby.log
