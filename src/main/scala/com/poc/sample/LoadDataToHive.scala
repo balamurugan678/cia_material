@@ -8,7 +8,7 @@ import org.apache.spark.sql.hive.HiveContext
 
 object LoadDataToHive {
 
-  def reconcile(hiveDatabase: String, baseTableName: String, incrementalTableName: String, uniqueKeyList: Seq[String], partitionColumnList: Seq[String], hiveContext: HiveContext): Unit = {
+  def reconcile(hiveDatabase: String, baseTableName: String, incrementalTableName: String, uniqueKeyList: Seq[String], partitionColumnList: Seq[String], seqColumn: String, versionIndicator:String, hiveContext: HiveContext): Unit = {
 
     hiveContext.sql(s"use $hiveDatabase")
 
@@ -22,7 +22,7 @@ object LoadDataToHive {
     println("******Base Table with the incremented partitions******* with " + basePartitionsDataframe.count() + " rows")
     basePartitionsDataframe.show()
 
-    val upsertDataframe: DataFrame = getUpsertBaseTableData(hiveContext, basePartitionsDataframe, incrementalDataframe, uniqueKeyList)
+    val upsertDataframe: DataFrame = getUpsertBaseTableData(hiveContext, basePartitionsDataframe, incrementalDataframe, uniqueKeyList, seqColumn)
     println("******Upserted Base Table with the incremented partitions******* with " + upsertDataframe.count() + " rows")
     upsertDataframe.show()
 
@@ -30,7 +30,8 @@ object LoadDataToHive {
     println("******Initial Base Table with all the partitions******* with " + baseDataframe.count() + " rows")
     baseDataframe.show(50)
 
-    writeUpsertDataBackToBasePartitions(baseTableName, partitionColumns, upsertDataframe)
+    val writeMode = if (versionIndicator == "Y") "append" else "overwrite"
+    writeUpsertDataBackToBasePartitions(baseTableName, partitionColumns, writeMode, upsertDataframe)
 
     val newBaseDataframe = hiveContext.table(baseTableName)
     println("******Reconciled Base Table******* with " + newBaseDataframe.count() + " rows")
@@ -38,11 +39,11 @@ object LoadDataToHive {
   }
 
 
-  def writeUpsertDataBackToBasePartitions(baseTableName: String, partitionColumns: String, upsertDataframe: DataFrame) = {
+  def writeUpsertDataBackToBasePartitions(baseTableName: String, partitionColumns: String, writeMode:String, upsertDataframe: DataFrame) = {
     upsertDataframe
       .write
       .format("com.databricks.spark.avro")
-      .mode("overwrite")
+      .mode(writeMode)
       .partitionBy(partitionColumns)
       .insertInto(baseTableName)
   }
@@ -70,9 +71,9 @@ object LoadDataToHive {
     partitionWhereClause
   }
 
-  def getUpsertBaseTableData(hiveContext: HiveContext, baseTableDataframe: DataFrame, incrementalData: DataFrame, uniqueKeyList: Seq[String]): DataFrame = {
+  def getUpsertBaseTableData(hiveContext: HiveContext, baseTableDataframe: DataFrame, incrementalData: DataFrame, uniqueKeyList: Seq[String], seqColumn: String): DataFrame = {
     val columns = baseTableDataframe.columns
-    val windowFunction = Window.partitionBy(uniqueKeyList.head, uniqueKeyList.tail: _*).orderBy(desc("header__changesequence"))
+    val windowFunction = Window.partitionBy(uniqueKeyList.head, uniqueKeyList.tail: _*).orderBy(desc(seqColumn))
     val duplicateFreeIncrementDF = incrementalData.withColumn("rownum", row_number.over(windowFunction)).where("rownum = 1").drop("rownum")
 
     val incrementDataFrame = duplicateFreeIncrementDF.toDF(duplicateFreeIncrementDF.columns.map(x => x.trim + "_i"): _*)

@@ -13,6 +13,7 @@
         <scala.version>2.10.6</scala.version>
         <spark.avro.version>2.0.1</spark.avro.version>
         <mysql.version>5.1.28</mysql.version>
+        <json4s.version>3.2.10</json4s.version>
     </properties>
 
     <dependencies>
@@ -48,6 +49,16 @@
             <groupId>mysql</groupId>
             <artifactId>mysql-connector-java</artifactId>
             <version>${mysql.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.json4s</groupId>
+            <artifactId>json4s-native_2.10</artifactId>
+            <version>${json4s.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.json4s</groupId>
+            <artifactId>json4s-jackson_2.10</artifactId>
+            <version>${json4s.version}</version>
         </dependency>
     </dependencies>
 

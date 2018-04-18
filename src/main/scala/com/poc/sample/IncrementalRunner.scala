@@ -1,7 +1,12 @@
 package com.poc.sample
 
+import com.poc.sample.Models.{CIAMaterialConfig, MaterialConfig}
+import org.apache.hadoop.conf.Configuration
+import org.apache.hadoop.fs.FileSystem
 import org.apache.spark.sql.hive.HiveContext
 import org.apache.spark.{SparkConf, SparkContext}
+import org.json4s.DefaultFormats
+import org.json4s.jackson.JsonMethods.parse
 
 import scala.io.Source
 
@@ -14,29 +19,44 @@ object IncrementalRunner {
 
     val sparkContext = new SparkContext(sparkConf)
     sparkContext.setLogLevel("WARN")
+    val hadoopConfig = sparkContext.hadoopConfiguration
+    val hadoopFileSystem = FileSystem.get(hadoopConfig)
     val hiveContext = new HiveContext(sparkContext)
 
-    Source.fromFile(sparkContext.getConf.get("spark.configFileLocation"))
-      .getLines
-      .foreach(line => {
+    val ciaMaterialConfig: CIAMaterialConfig = parseMaterializationConfig(sparkContext)
 
-        val configList = line.split("~")
-        val hiveDatabase = configList(0)
-        val baseTableName = configList(1)
-        val incrementalTableName = configList(2)
-        val pathToLoad = configList(3)
-        val uniqueKeyList = configList(4).split('|').toSeq
-        val partitionColumns = configList(5).split('|').toSeq
-
-        IncrementalTableSetUp.loadIncrementalData(pathToLoad, hiveDatabase, incrementalTableName, hiveContext)
-
-        LoadDataToHive.reconcile(hiveDatabase, baseTableName, incrementalTableName, uniqueKeyList, partitionColumns, hiveContext)
-
-        hiveContext.sql(s"drop table $incrementalTableName")
-
-      })
-
+    ciaMaterialConfig.materialConfigs.foreach(materialConfig => {
+      materializeTable(hadoopConfig, hadoopFileSystem, hiveContext, materialConfig)
+    })
 
   }
 
+  def materializeTable(hadoopConfig: Configuration, hadoopFileSystem: FileSystem, hiveContext: HiveContext, materialConfig: MaterialConfig) = {
+    val hiveDatabase = materialConfig.hiveDatabase
+    val baseTableName = materialConfig.baseTableName
+    val incrementalTableName = materialConfig.incrementalTableName
+    val pathToLoad = materialConfig.pathToLoad
+    val processedPathToMove = materialConfig.processedPathToMove
+    val uniqueKeyList = materialConfig.uniqueKeyList.split('|').toSeq
+    val partitionColumns = materialConfig.partitionColumns.split('|').toSeq
+    val seqColumn = materialConfig.seqColumn
+    val versionIndicator = materialConfig.versionIndicator
+
+    IncrementalTableSetUp.loadIncrementalData(pathToLoad, hiveDatabase, incrementalTableName, hiveContext)
+
+    LoadDataToHive.reconcile(hiveDatabase, baseTableName, incrementalTableName, uniqueKeyList, partitionColumns, seqColumn, versionIndicator, hiveContext)
+
+    MaterializationCloseDown.dropIncrementalExtTable(incrementalTableName, hiveContext)
+
+    MaterializationCloseDown.moveFilesToProcessedDirectory(hadoopConfig, hadoopFileSystem, pathToLoad, processedPathToMove)
+
+  }
+
+  def parseMaterializationConfig(sparkContext: SparkContext) = {
+    val sparkConfigJSONString = Source.fromFile(sparkContext.getConf.get("spark.configFileLocation")).mkString
+    implicit val formats = DefaultFormats
+    val json = parse(sparkConfigJSONString)
+    val ciaMaterialConfig = json.extract[CIAMaterialConfig]
+    ciaMaterialConfig
+  }
 }
