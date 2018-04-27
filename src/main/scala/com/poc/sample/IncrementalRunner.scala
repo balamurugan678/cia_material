@@ -19,19 +19,20 @@ object IncrementalRunner {
 
     val sparkContext = new SparkContext(sparkConf)
     sparkContext.setLogLevel("WARN")
+
+    val ciaMaterialConfig: CIAMaterialConfig = parseMaterializationConfig(sparkContext)
+
     val hadoopConfig = sparkContext.hadoopConfiguration
     val hadoopFileSystem = FileSystem.get(hadoopConfig)
     val hiveContext = new HiveContext(sparkContext)
 
-    val ciaMaterialConfig: CIAMaterialConfig = parseMaterializationConfig(sparkContext)
-
     ciaMaterialConfig.materialConfigs.foreach(materialConfig => {
-      materializeTable(hadoopConfig, hadoopFileSystem, hiveContext, materialConfig)
+      materializeTable(hadoopConfig, hadoopFileSystem, sparkContext, hiveContext, materialConfig)
     })
 
   }
 
-  def materializeTable(hadoopConfig: Configuration, hadoopFileSystem: FileSystem, hiveContext: HiveContext, materialConfig: MaterialConfig) = {
+  def materializeTable(hadoopConfig: Configuration, hadoopFileSystem: FileSystem, sparkContext:SparkContext, hiveContext: HiveContext, materialConfig: MaterialConfig) = {
     val hiveDatabase = materialConfig.hiveDatabase
     val baseTableName = materialConfig.baseTableName
     val incrementalTableName = materialConfig.incrementalTableName
@@ -44,11 +45,13 @@ object IncrementalRunner {
 
     IncrementalTableSetUp.loadIncrementalData(pathToLoad, hiveDatabase, incrementalTableName, hiveContext)
 
-    LoadDataToHive.reconcile(hiveDatabase, baseTableName, incrementalTableName, uniqueKeyList, partitionColumns, seqColumn, versionIndicator, hiveContext)
+    val ciaNotification = LoadDataToHive.reconcile(pathToLoad, hiveDatabase, baseTableName, incrementalTableName, uniqueKeyList, partitionColumns, seqColumn, versionIndicator, hiveContext)
 
     MaterializationCloseDown.dropIncrementalExtTable(incrementalTableName, hiveContext)
 
     MaterializationCloseDown.moveFilesToProcessedDirectory(hadoopConfig, hadoopFileSystem, pathToLoad, processedPathToMove)
+
+    MaterializationNotification.persistNotificationInES(sparkContext, ciaNotification)
 
   }
 
@@ -59,4 +62,5 @@ object IncrementalRunner {
     val ciaMaterialConfig = json.extract[CIAMaterialConfig]
     ciaMaterialConfig
   }
+
 }
