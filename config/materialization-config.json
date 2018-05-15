@@ -14,7 +14,7 @@
       "partitionColumns": "",
       "seqColumn": "header__timestamp",
       "versionIndicator": "N",
-      "headerOperation": "header__operation",
+      "headerOperation": "A_ENTTYP",
       "deleteIndicator": "DL"
     }
   ]

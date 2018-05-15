@@ -9,15 +9,18 @@ import org.apache.spark.sql.DataFrame
 import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.functions.{coalesce, col, max, _}
 import org.apache.spark.sql.hive.HiveContext
+import org.slf4j.LoggerFactory
 
 object LoadDataToHive {
+
+  val logger = LoggerFactory.getLogger(this.getClass.getName)
 
   def reconcile(pathToLoad: String, hiveDatabase: String, baseTableName: String, incrementalTableName: String, uniqueKeyList: Seq[String], partitionColumnList: Seq[String], seqColumn: String, versionIndicator: String, headerOperation: String, deleteIndicator: String, hiveContext: HiveContext): CIANotification = {
 
     hiveContext.sql(s"use $hiveDatabase")
 
     val incrementalDataframe = hiveContext.table(incrementalTableName)
-    println("******Incremental External Table******* with " + incrementalDataframe.count() + " rows")
+    logger.info("******Incremental External Table******* with " + incrementalDataframe.count() + " rows")
     incrementalDataframe.show()
 
     val partitionColumns = partitionColumnList.mkString(",")
@@ -57,18 +60,18 @@ object LoadDataToHive {
     } else {
       val partitionWhereClause: String = getIncrementPartitions(incrementalTableName, partitionColumnList, hiveContext, partitionColumns)
       val basePartitionsDataframe: DataFrame = getBaseTableDataFromIncPartitions(baseTableName, hiveContext, partitionColumns, partitionWhereClause)
-      println("******Base Table with the incremented partitions******* with " + basePartitionsDataframe.count() + " rows")
+      logger.info("******Base Table with the incremented partitions******* with " + basePartitionsDataframe.count() + " rows")
       basePartitionsDataframe.show()
       basePartitionsDataframe
     }
 
 
     val upsertDataframe: DataFrame = getUpsertBaseTableData(hiveContext, baseDataFrame, incrementalDataframe, uniqueKeyList, seqColumn, headerOperation, deleteIndicator)
-    println("******Upserted Base Table with the incremented partitions******* with " + upsertDataframe.count() + " rows")
+    logger.info("******Upserted Base Table with the incremented partitions******* with " + upsertDataframe.count() + " rows")
     upsertDataframe.show()
 
     val baseDataframe = hiveContext.table(baseTableName)
-    println("******Initial Base Table with all the partitions******* with " + baseDataframe.count() + " rows")
+    logger.info("******Initial Base Table with all the partitions******* with " + baseDataframe.count() + " rows")
     baseDataframe.show(50)
 
 
@@ -79,7 +82,7 @@ object LoadDataToHive {
     }
 
     val newBaseDataframe = hiveContext.table(baseTableName)
-    println("******Reconciled Base Table******* with " + newBaseDataframe.count() + " rows")
+    logger.info("******Reconciled Base Table******* with " + newBaseDataframe.count() + " rows")
     newBaseDataframe.show(50)
 
     currentTimestamp
@@ -88,7 +91,7 @@ object LoadDataToHive {
 
   def materializeAndKeepVersion(baseTableName: String, hiveContext: HiveContext, incrementalDataframe: DataFrame, partitionColumnList: Seq[String], partitionColumns: String): String = {
     val baseDataframe = hiveContext.table(baseTableName)
-    println("******Initial Base Table with all the partitions******* with " + baseDataframe.count() + " rows")
+    logger.info("******Initial Base Table with all the partitions******* with " + baseDataframe.count() + " rows")
     baseDataframe.show(50)
 
     val currentTimestamp = partitionColumnList match {
@@ -97,7 +100,7 @@ object LoadDataToHive {
     }
 
     val newBaseDataframe = hiveContext.table(baseTableName)
-    println("******Reconciled Base Table******* with " + newBaseDataframe.count() + " rows")
+    logger.info("******Reconciled Base Table******* with " + newBaseDataframe.count() + " rows")
     newBaseDataframe.show(50)
 
     currentTimestamp
@@ -149,7 +152,7 @@ object LoadDataToHive {
 
     val windowFunction = Window.partitionBy(uniqueKeyList.head, uniqueKeyList.tail: _*).orderBy(desc(seqColumn))
     val duplicateFreeIncrementDF = incrementalData.withColumn("rownum", row_number.over(windowFunction)).where("rownum = 1").drop("rownum")
-    println("******DuplicateFreeIncrementDF incrementalData Table******* with " + duplicateFreeIncrementDF.count() + " rows")
+    logger.info("******DuplicateFreeIncrementDF incrementalData Table******* with " + duplicateFreeIncrementDF.count() + " rows")
     duplicateFreeIncrementDF.show()
 
     val tsAppendedIncDF = duplicateFreeIncrementDF.withColumn("modified_timestamp", lit(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(LocalDateTime.now)))
@@ -174,7 +177,7 @@ object LoadDataToHive {
       .reduce(_ && _)
 
     val joinedDataFrame = baseTableDataframe.join(incrementDataFrame, joinExprs, "outer")
-    println("******joinedDataFrame incrementalData Table******* with " + joinedDataFrame.count() + " rows")
+    logger.info("******joinedDataFrame incrementalData Table******* with " + joinedDataFrame.count() + " rows")
     joinedDataFrame.show()
 
 

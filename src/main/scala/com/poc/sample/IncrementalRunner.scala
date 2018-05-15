@@ -42,7 +42,7 @@ object IncrementalRunner {
     val partitionColumns = materialConfig.partitionColumns.split('|').toSeq
     val seqColumn = materialConfig.seqColumn
     val versionIndicator = materialConfig.versionIndicator
-§    val headerOperation = materialConfig.headerOperation
+    val headerOperation = materialConfig.headerOperation
     val deleteIndicator = materialConfig.deleteIndicator
 
 
