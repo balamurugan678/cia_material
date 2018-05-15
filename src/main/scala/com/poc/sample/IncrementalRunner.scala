@@ -42,16 +42,19 @@ object IncrementalRunner {
     val partitionColumns = materialConfig.partitionColumns.split('|').toSeq
     val seqColumn = materialConfig.seqColumn
     val versionIndicator = materialConfig.versionIndicator
+§    val headerOperation = materialConfig.headerOperation
+    val deleteIndicator = materialConfig.deleteIndicator
+
 
     IncrementalTableSetUp.loadIncrementalData(pathToLoad, hiveDatabase, incrementalTableName, hiveContext)
 
-    val ciaNotification = LoadDataToHive.reconcile(pathToLoad, hiveDatabase, baseTableName, incrementalTableName, uniqueKeyList, partitionColumns, seqColumn, versionIndicator, hiveContext)
+    val ciaNotification = LoadDataToHive.reconcile(pathToLoad, hiveDatabase, baseTableName, incrementalTableName, uniqueKeyList, partitionColumns, seqColumn, versionIndicator, headerOperation, deleteIndicator, hiveContext)
 
     MaterializationCloseDown.dropIncrementalExtTable(incrementalTableName, hiveContext)
 
     MaterializationCloseDown.moveFilesToProcessedDirectory(hadoopConfig, hadoopFileSystem, pathToLoad, processedPathToMove)
 
-    MaterializationNotification.persistNotificationInES(sparkContext, ciaNotification)
+    //MaterializationNotification.persistNotificationInES(sparkContext, ciaNotification)
 
   }
 
