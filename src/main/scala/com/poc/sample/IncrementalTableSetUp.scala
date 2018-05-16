@@ -15,6 +15,7 @@ object IncrementalTableSetUp {
 
     val schemaString = rawSchema.fields.map(field => field.name.replaceAll("""^_""", "").concat(" ").concat(field.dataType.typeName match {
       case "integer" => "int"
+      case "Long" | "long" => "bigint"
       case others => others
     })).mkString(",")
 

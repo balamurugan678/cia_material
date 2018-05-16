@@ -189,8 +189,15 @@ object LoadDataToHive {
           .withColumnRenamed(colName + "_j", colName)
     }
 
+    val upsertedColumns = upsertDataFrame.columns
+    val additionalColumns = upsertedColumns diff columns
 
-    val deleteUpsertFreeDataframe = upsertDataFrame.filter(upsertDataFrame(headerOperation).notEqual(deleteIndicator))
+    val materializedDataframe = additionalColumns.foldLeft(upsertDataFrame) {
+      (acc: DataFrame, colName: String) =>
+        acc.drop(colName)
+    }
+
+    val deleteUpsertFreeDataframe = materializedDataframe.filter(materializedDataframe(headerOperation).notEqual(deleteIndicator))
     deleteUpsertFreeDataframe
   }
 
