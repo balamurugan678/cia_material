@@ -13,12 +13,10 @@ object IncrementalTableSetUp {
 
     val rawSchema = incrementalData.schema
 
-    val schemaString = rawSchema.fields.map(field => field.name.replaceAll("""^_""", "").concat(" ").concat(field.dataType.typeName match {
-      case "integer" => "int"
-      case "Long" | "long" => "bigint"
+    val schemaString = rawSchema.fields.map(field => field.name.toLowerCase().replaceAll("""^_""", "").concat(" ").concat(field.dataType.typeName match {
+      case "integer" | "Long" | "long" => "bigint"
       case others => others
     })).mkString(",")
-
 
     hiveContext.sql(s"USE $hiveDatabase")
 
@@ -31,10 +29,59 @@ object IncrementalTableSetUp {
          |-- inputformat 'org.apache.hadoop.hive.ql.io.avro.AvroContainerInputFormat' \n
          | -- outputformat 'org.apache.hadoop.hive.ql.io.avro.AvroContainerOutputFormat' \n
          |LOCATION '$pathToLoad' \n
+         |TBLPROPERTIES('avro.schema.literal' = '{
+         |  "type" : "record",
+         |  "name" : "MyClass",
+         |  "namespace" : "com.test.avro",
+         |  "fields" : [ {
+         |    "name" : "emplo00001",
+         |    "aliases":["EMPLO00001"],
+         |    "type" : "long"
+         |  }, {
+         |    "name" : "first_name",
+         |    "aliases":["FIRST_NAME"],
+         |    "type" : "string"
+         |  }, {
+         |    "name" : "secon00001",
+         |    "aliases":["SECON00001"],
+         |    "type" : "string"
+         |  }, {
+         |    "name" : "age",
+         |    "aliases":["AGE"],
+         |    "type" : "string"
+         |  }, {
+         |    "name" : "salary",
+         |    "aliases":["SALARY"],
+         |    "type" : "string"
+         |  }, {
+         |    "name" : "dept",
+         |    "aliases":["DEPT"],
+         |    "type" : "string"
+         |  }, {
+         |    "name" : "a_enttyp",
+         |    "aliases":["A_ENTTYP"],
+         |    "type" : "string"
+         |  }, {
+         |    "name" : "a_timstamp",
+         |    "aliases":["A_TIMSTAMP"],
+         |    "type" : "string"
+         |  }, {
+         |    "name" : "a_seqno",
+         |     "aliases":["A_SEQNO"],
+         |    "type" : "string"
+         |  }, {
+         |    "name" : "a_system",
+         |     "aliases":["A_SYSTEM"],
+         |    "type" : "string"
+         |  }, {
+         |    "name" : "a_user",
+         |     "aliases":["A_USER"],
+         |    "type" : "string"
+         |  } ]
+         |}')
        """.stripMargin
 
     hiveContext.sql(incrementalExtTable)
-
   }
 
 }
