@@ -20,7 +20,7 @@ object LoadDataToHive {
     hiveContext.sql(s"use $hiveDatabase")
 
     val incrementalDataframe = hiveContext.table(incrementalTableName)
-    logger.info("******Incremental External Table******* with " + incrementalDataframe.count() + " rows")
+    println("******Incremental External Table******* with " + incrementalDataframe.count() + " rows")
     incrementalDataframe.show()
 
     val partitionColumns = partitionColumnList.mkString(",")
@@ -30,7 +30,7 @@ object LoadDataToHive {
         val notification: CIANotification = buildNotificationObject(pathToLoad, hiveDatabase, baseTableName, seqColumn, incrementalDataframe, currentTimestamp)
         notification
       case "N" =>
-        val currentTimestamp = materializeWithLatestVersion(baseTableName, incrementalTableName, uniqueKeyList, partitionColumnList, seqColumn, hiveContext, incrementalDataframe, partitionColumns,headerOperation, deleteIndicator)
+        val currentTimestamp = materializeWithLatestVersion(baseTableName, incrementalTableName, uniqueKeyList, partitionColumnList, seqColumn, hiveContext, incrementalDataframe, partitionColumns, headerOperation, deleteIndicator)
         val notification: CIANotification = buildNotificationObject(pathToLoad, hiveDatabase, baseTableName, seqColumn, incrementalDataframe, currentTimestamp)
         notification
     }
@@ -52,7 +52,7 @@ object LoadDataToHive {
     latestTimeStamp
   }
 
-  def materializeWithLatestVersion(baseTableName: String, incrementalTableName: String, uniqueKeyList: Seq[String], partitionColumnList: Seq[String], seqColumn: String, hiveContext: HiveContext, incrementalDataframe: DataFrame, partitionColumns: String,headerOperation: String, deleteIndicator:String): String = {
+  def materializeWithLatestVersion(baseTableName: String, incrementalTableName: String, uniqueKeyList: Seq[String], partitionColumnList: Seq[String], seqColumn: String, hiveContext: HiveContext, incrementalDataframe: DataFrame, partitionColumns: String, headerOperation: String, deleteIndicator: String): String = {
 
     val baseDataFrame = if (partitionColumns.size == 0) {
       val baseTableDataframe = hiveContext.table(baseTableName)
@@ -75,9 +75,9 @@ object LoadDataToHive {
     baseDataframe.show(50)
 
 
-    val currentTimestamp = if(partitionColumns.size == 0){
-      writeUpsertDataBackToBaseTableWithoutPartitions(baseTableName, "append", upsertDataframe)
-    }else{
+    val currentTimestamp = if (partitionColumns.size == 0) {
+      writeUpsertDataBackToBaseTableWithoutPartitions(baseTableName, "overwrite", upsertDataframe)
+    } else {
       writeUpsertDataBackToBasePartitions(baseTableName, partitionColumns, "overwrite", upsertDataframe)
     }
 
@@ -148,7 +148,7 @@ object LoadDataToHive {
     partitionWhereClause
   }
 
-  def getUpsertBaseTableData(hiveContext: HiveContext, baseTableDataframe: DataFrame, incrementalData: DataFrame, uniqueKeyList: Seq[String], seqColumn: String, headerOperation: String, deleteIndicator:String): DataFrame = {
+  def getUpsertBaseTableData(hiveContext: HiveContext, baseTableDataframe: DataFrame, incrementalData: DataFrame, uniqueKeyList: Seq[String], seqColumn: String, headerOperation: String, deleteIndicator: String): DataFrame = {
 
     val windowFunction = Window.partitionBy(uniqueKeyList.head, uniqueKeyList.tail: _*).orderBy(desc(seqColumn))
     val duplicateFreeIncrementDF = incrementalData.withColumn("rownum", row_number.over(windowFunction)).where("rownum = 1").drop("rownum")
@@ -183,7 +183,7 @@ object LoadDataToHive {
 
     val upsertDataFrame = columns.foldLeft(joinedDataFrame) {
       (acc: DataFrame, colName: String) =>
-        acc.withColumn(colName + "_j",coalesce(col(colName + "_i"), col(colName)))
+        acc.withColumn(colName + "_j", coalesce(col(colName + "_i"), col(colName)))
           .drop(colName)
           .drop(colName + "_i")
           .withColumnRenamed(colName + "_j", colName)

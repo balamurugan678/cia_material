@@ -32,7 +32,7 @@ object IncrementalRunner {
 
   }
 
-  def materializeTable(hadoopConfig: Configuration, hadoopFileSystem: FileSystem, sparkContext:SparkContext, hiveContext: HiveContext, materialConfig: MaterialConfig) = {
+  def materializeTable(hadoopConfig: Configuration, hadoopFileSystem: FileSystem, sparkContext: SparkContext, hiveContext: HiveContext, materialConfig: MaterialConfig) = {
     val hiveDatabase = materialConfig.hiveDatabase
     val baseTableName = materialConfig.baseTableName
     val incrementalTableName = materialConfig.incrementalTableName
