@@ -1,10 +1,15 @@
 package com.poc.sample
 
+import com.fasterxml.jackson.databind.{DeserializationFeature, ObjectMapper}
+import com.fasterxml.jackson.module.scala.DefaultScalaModule
+import com.fasterxml.jackson.module.scala.experimental.ScalaObjectMapper
+import com.poc.sample.Models.{AvroSchema, Fields}
 import org.apache.spark.sql.hive.HiveContext
+import org.apache.spark.sql.types.StructType
 
 object IncrementalTableSetUp {
 
-  def loadIncrementalData(pathToLoad: String, hiveDatabase: String, baseTableName:String, incrementalTableName: String, hiveContext: HiveContext): Unit = {
+  def loadIncrementalData(pathToLoad: String, hiveDatabase: String, baseTableName: String, incrementalTableName: String, hiveContext: HiveContext): Unit = {
 
     val incrementalData = hiveContext
       .read
@@ -12,12 +17,14 @@ object IncrementalTableSetUp {
       .load(pathToLoad)
 
     val rawSchema = incrementalData.schema
-    val baseTableUpper = baseTableName.toUpperCase
 
     val schemaString = rawSchema.fields.map(field => field.name.toLowerCase().replaceAll("""^_""", "").concat(" ").concat(field.dataType.typeName match {
       case "integer" | "Long" | "long" => "bigint"
       case others => others
     })).mkString(",")
+
+    val avroSchemaString: String = buildAvroSchema(hiveDatabase, rawSchema, baseTableName)
+
 
     hiveContext.sql(s"USE $hiveDatabase")
 
@@ -30,60 +37,24 @@ object IncrementalTableSetUp {
          |-- inputformat 'org.apache.hadoop.hive.ql.io.avro.AvroContainerInputFormat' \n
          | -- outputformat 'org.apache.hadoop.hive.ql.io.avro.AvroContainerOutputFormat' \n
          |LOCATION '$pathToLoad' \n
-         |TBLPROPERTIES('avro.schema.literal' = '{
-         |  "type" : "record",
-         |  "name" : "$baseTableUpper",
-         |  "namespace" : "value.SOURCEDB.GBR901UDTA",
-         |  "fields" : [ {
-         |    "name" : "emplo00001",
-         |    "aliases":["EMPLO00001"],
-         |    "type" : "long"
-         |  }, {
-         |    "name" : "first_name",
-         |    "aliases":["FIRST_NAME"],
-         |    "type" : "string"
-         |  }, {
-         |    "name" : "secon00001",
-         |    "aliases":["SECON00001"],
-         |    "type" : "string"
-         |  }, {
-         |    "name" : "age",
-         |    "aliases":["AGE"],
-         |    "type" : "string"
-         |  }, {
-         |    "name" : "salary",
-         |    "aliases":["SALARY"],
-         |    "type" : "string"
-         |  }, {
-         |    "name" : "dept",
-         |    "aliases":["DEPT"],
-         |    "type" : "string"
-         |  }, {
-         |    "name" : "a_enttyp",
-         |    "aliases":["A_ENTTYP"],
-         |    "type" : "string"
-         |  }, {
-         |    "name" : "a_timestamp",
-         |    "aliases":["A_TIMESTAMP"],
-         |    "type" : "string"
-         |  }, {
-         |    "name" : "a_seqno",
-         |     "aliases":["A_SEQNO"],
-         |    "type" : "string"
-         |  }, {
-         |    "name" : "a_system",
-         |     "aliases":["A_SYSTEM"],
-         |    "type" : "string"
-         |  }, {
-         |    "name" : "a_user",
-         |     "aliases":["A_USER"],
-         |    "type" : "string"
-         |  } ]
-         |}')
+         |TBLPROPERTIES('avro.schema.literal' = '$avroSchemaString')
        """.stripMargin
 
     hiveContext.sql(incrementalExtTable)
+
+    val incrementalDataframe = hiveContext.table(incrementalTableName)
+    println("******Incremental External Table******* with " + incrementalDataframe.count() + " rows")
+    incrementalDataframe.show()
   }
 
 
+  def buildAvroSchema(hiveDatabase: String, rawSchema: StructType, baseTableName: String) = {
+    val schemaList = rawSchema.fields.map(field => Fields(field.name, field.name, field.dataType.typeName))
+    val mapper = new ObjectMapper with ScalaObjectMapper
+    mapper.registerModule(DefaultScalaModule)
+    mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+    val avroSchema = AvroSchema("record", baseTableName, hiveDatabase, schemaList)
+    val avroSchemaString = mapper.writeValueAsString(avroSchema)
+    avroSchemaString
+  }
 }
