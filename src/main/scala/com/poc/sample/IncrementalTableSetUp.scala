@@ -63,8 +63,8 @@ object IncrementalTableSetUp {
          |    "aliases":["A_ENTTYP"],
          |    "type" : "string"
          |  }, {
-         |    "name" : "a_timstamp",
-         |    "aliases":["A_TIMSTAMP"],
+         |    "name" : "a_timestamp",
+         |    "aliases":["A_TIMESTAMP"],
          |    "type" : "string"
          |  }, {
          |    "name" : "a_seqno",
