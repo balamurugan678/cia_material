@@ -23,15 +23,17 @@ object LoadDataToHive {
     println("******Incremental External Table******* with " + incrementalDataframe.count() + " rows")
     incrementalDataframe.show()
 
+    val incrementalUBFreeDataframe = incrementalDataframe.filter(incrementalDataframe(headerOperation).notEqual("UB"))
+
     val partitionColumns = partitionColumnList.mkString(",")
     val ciaNotification: CIANotification = versionIndicator match {
       case "Y" =>
-        val currentTimestamp = materializeAndKeepVersion(baseTableName, hiveContext, incrementalDataframe, partitionColumnList, partitionColumns)
-        val notification: CIANotification = buildNotificationObject(pathToLoad, hiveDatabase, baseTableName, seqColumn, incrementalDataframe, currentTimestamp)
+        val currentTimestamp = materializeAndKeepVersion(baseTableName, hiveContext, incrementalUBFreeDataframe, partitionColumnList, partitionColumns)
+        val notification: CIANotification = buildNotificationObject(pathToLoad, hiveDatabase, baseTableName, seqColumn, incrementalUBFreeDataframe, currentTimestamp)
         notification
       case "N" =>
-        val currentTimestamp = materializeWithLatestVersion(baseTableName, incrementalTableName, uniqueKeyList, partitionColumnList, seqColumn, hiveContext, incrementalDataframe, partitionColumns, headerOperation, deleteIndicator)
-        val notification: CIANotification = buildNotificationObject(pathToLoad, hiveDatabase, baseTableName, seqColumn, incrementalDataframe, currentTimestamp)
+        val currentTimestamp = materializeWithLatestVersion(baseTableName, incrementalTableName, uniqueKeyList, partitionColumnList, seqColumn, hiveContext, incrementalUBFreeDataframe, partitionColumns, headerOperation, deleteIndicator)
+        val notification: CIANotification = buildNotificationObject(pathToLoad, hiveDatabase, baseTableName, seqColumn, incrementalUBFreeDataframe, currentTimestamp)
         notification
     }
 

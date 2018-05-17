@@ -4,7 +4,7 @@ import org.apache.spark.sql.hive.HiveContext
 
 object IncrementalTableSetUp {
 
-  def loadIncrementalData(pathToLoad: String, hiveDatabase: String, incrementalTableName: String, hiveContext: HiveContext): Unit = {
+  def loadIncrementalData(pathToLoad: String, hiveDatabase: String, baseTableName:String, incrementalTableName: String, hiveContext: HiveContext): Unit = {
 
     val incrementalData = hiveContext
       .read
@@ -12,6 +12,7 @@ object IncrementalTableSetUp {
       .load(pathToLoad)
 
     val rawSchema = incrementalData.schema
+    val baseTableUpper = baseTableName.toUpperCase
 
     val schemaString = rawSchema.fields.map(field => field.name.toLowerCase().replaceAll("""^_""", "").concat(" ").concat(field.dataType.typeName match {
       case "integer" | "Long" | "long" => "bigint"
@@ -31,8 +32,8 @@ object IncrementalTableSetUp {
          |LOCATION '$pathToLoad' \n
          |TBLPROPERTIES('avro.schema.literal' = '{
          |  "type" : "record",
-         |  "name" : "MyClass",
-         |  "namespace" : "com.test.avro",
+         |  "name" : "$baseTableUpper",
+         |  "namespace" : "value.SOURCEDB.GBR901UDTA",
          |  "fields" : [ {
          |    "name" : "emplo00001",
          |    "aliases":["EMPLO00001"],
@@ -83,5 +84,6 @@ object IncrementalTableSetUp {
 
     hiveContext.sql(incrementalExtTable)
   }
+
 
 }

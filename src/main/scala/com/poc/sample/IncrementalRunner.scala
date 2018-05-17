@@ -45,17 +45,23 @@ object IncrementalRunner {
     val headerOperation = materialConfig.headerOperation
     val deleteIndicator = materialConfig.deleteIndicator
 
+    try{
+      IncrementalTableSetUp.loadIncrementalData(pathToLoad, hiveDatabase, baseTableName, incrementalTableName, hiveContext)
 
-    IncrementalTableSetUp.loadIncrementalData(pathToLoad, hiveDatabase, incrementalTableName, hiveContext)
+      val ciaNotification = LoadDataToHive.reconcile(pathToLoad, hiveDatabase, baseTableName, incrementalTableName, uniqueKeyList, partitionColumns, seqColumn, versionIndicator, headerOperation, deleteIndicator, hiveContext)
 
-    val ciaNotification = LoadDataToHive.reconcile(pathToLoad, hiveDatabase, baseTableName, incrementalTableName, uniqueKeyList, partitionColumns, seqColumn, versionIndicator, headerOperation, deleteIndicator, hiveContext)
+      MaterializationCloseDown.dropIncrementalExtTable(incrementalTableName, hiveContext)
 
-    MaterializationCloseDown.dropIncrementalExtTable(incrementalTableName, hiveContext)
+      MaterializationCloseDown.moveFilesToProcessedDirectory(hadoopConfig, hadoopFileSystem, pathToLoad, processedPathToMove)
 
-    MaterializationCloseDown.moveFilesToProcessedDirectory(hadoopConfig, hadoopFileSystem, pathToLoad, processedPathToMove)
-
-    //MaterializationNotification.persistNotificationInES(sparkContext, ciaNotification)
-
+      //MaterializationNotification.persistNotificationInES(sparkContext, ciaNotification)
+    }
+    catch {
+      case ex:Exception => println(s"No delta avro files present for the table $baseTableName at the path $pathToLoad. Moving onto the next config!!")
+    }
+    finally {
+      println(s"Materialization is done for the table $baseTableName with the change data at $pathToLoad. Moving onto the next config!!")
+    }
   }
 
   def parseMaterializationConfig(sparkContext: SparkContext) = {
