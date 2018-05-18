@@ -4,18 +4,24 @@ package com.poc.sample
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 
-import com.poc.sample.Models.CIANotification
+import com.fasterxml.jackson.databind.{DeserializationFeature, ObjectMapper}
+import com.fasterxml.jackson.module.scala.DefaultScalaModule
+import com.poc.sample.Models._
 import org.apache.spark.sql.DataFrame
 import org.apache.spark.sql.expressions.Window
 import org.apache.spark.sql.functions.{coalesce, col, max, _}
 import org.apache.spark.sql.hive.HiveContext
+import org.apache.spark.sql.types.StructType
 import org.slf4j.LoggerFactory
+
+import scala.util.Try
+import scala.util.control.Breaks._
 
 object LoadDataToHive {
 
   val logger = LoggerFactory.getLogger(this.getClass.getName)
 
-  def reconcile(pathToLoad: String, hiveDatabase: String, baseTableName: String, incrementalTableName: String, uniqueKeyList: Seq[String], partitionColumnList: Seq[String], seqColumn: String, versionIndicator: String, headerOperation: String, deleteIndicator: String, hiveContext: HiveContext): CIANotification = {
+  def reconcile(pathToLoad: String, hiveDatabase: String, baseTableName: String, incrementalTableName: String, uniqueKeyList: Seq[String], partitionColumnList: Seq[String], seqColumn: String, versionIndicator: String, headerOperation: String, deleteIndicator: String, mandatoryMetaData: Seq[String], hiveContext: HiveContext): CIANotification = {
 
     hiveContext.sql(s"use $hiveDatabase")
 
@@ -32,7 +38,7 @@ object LoadDataToHive {
         val notification: CIANotification = buildNotificationObject(pathToLoad, hiveDatabase, baseTableName, seqColumn, incrementalUBFreeDataframe, currentTimestamp)
         notification
       case "N" =>
-        val currentTimestamp = materializeWithLatestVersion(baseTableName, incrementalTableName, uniqueKeyList, partitionColumnList, seqColumn, hiveContext, incrementalUBFreeDataframe, partitionColumns, headerOperation, deleteIndicator)
+        val currentTimestamp = materializeWithLatestVersion(hiveDatabase, baseTableName, incrementalTableName, uniqueKeyList, partitionColumnList, seqColumn, hiveContext, incrementalUBFreeDataframe, partitionColumns, headerOperation, deleteIndicator, mandatoryMetaData)
         val notification: CIANotification = buildNotificationObject(pathToLoad, hiveDatabase, baseTableName, seqColumn, incrementalUBFreeDataframe, currentTimestamp)
         notification
     }
@@ -54,11 +60,42 @@ object LoadDataToHive {
     latestTimeStamp
   }
 
-  def materializeWithLatestVersion(baseTableName: String, incrementalTableName: String, uniqueKeyList: Seq[String], partitionColumnList: Seq[String], seqColumn: String, hiveContext: HiveContext, incrementalDataframe: DataFrame, partitionColumns: String, headerOperation: String, deleteIndicator: String): String = {
+  def hasColumn(df: DataFrame, path: String) = Try(df(path)).isSuccess
+
+  def materializeWithLatestVersion(hiveDatabase: String, baseTableName: String, incrementalTableName: String, uniqueKeyList: Seq[String], partitionColumnList: Seq[String], seqColumn: String, hiveContext: HiveContext, incrementalDataframe: DataFrame, partitionColumns: String, headerOperation: String, deleteIndicator: String, mandatoryMetaData: Seq[String]): String = {
 
     val baseDataFrame = if (partitionColumns.size == 0) {
       val baseTableDataframe = hiveContext.table(baseTableName)
-      baseTableDataframe
+
+      val fieldList = scala.collection.mutable.MutableList[AdditionalFields]()
+      var alterIndicator = false
+      breakable {
+        mandatoryMetaData.foreach(metadata => {
+          if(!hasColumn(baseTableDataframe, metadata)) {
+              val typeWithNullable = Array("string", "null")
+              val fields = AdditionalFields(metadata, metadata, typeWithNullable)
+              fieldList += fields
+              alterIndicator = true
+          }
+          else {
+            break()
+          }
+        })
+      }
+
+      if (alterIndicator) {
+        val avroSchemaString = buildAvroSchema(hiveDatabase, baseTableDataframe.schema, baseTableName, fieldList.toArray)
+        println("avroSchemaString"+avroSchemaString)
+        val incrementalExtTable =
+          s"""
+             |ALTER table $baseTableName \n
+             |SET TBLPROPERTIES('avro.schema.literal' = '$avroSchemaString')
+                     """.stripMargin
+        hiveContext.sql(incrementalExtTable)
+      }
+
+      val baseTableData = hiveContext.table(baseTableName)
+      baseTableData
     } else {
       val partitionWhereClause: String = getIncrementPartitions(incrementalTableName, partitionColumnList, hiveContext, partitionColumns)
       val basePartitionsDataframe: DataFrame = getBaseTableDataFromIncPartitions(baseTableName, hiveContext, partitionColumns, partitionWhereClause)
@@ -89,6 +126,19 @@ object LoadDataToHive {
 
     currentTimestamp
 
+  }
+
+
+  def buildAvroSchema(hiveDatabase: String, rawSchema: StructType, baseTableName: String, mandatoryMetadataArray: Array[AdditionalFields]) = {
+    println("mandatory"+ mandatoryMetadataArray)
+    val schemaList = rawSchema.fields.map(field => AdditionalFields(field.name, field.name, Array(field.dataType.typeName, "null")))
+    val finalSchemaList = schemaList ++ mandatoryMetadataArray
+    val mapper = new ObjectMapper
+    mapper.registerModule(DefaultScalaModule)
+    mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
+    val avroSchema = BaseAvroSchema("record", baseTableName, hiveDatabase, finalSchemaList)
+    val avroSchemaString = mapper.writeValueAsString(avroSchema)
+    avroSchemaString
   }
 
   def materializeAndKeepVersion(baseTableName: String, hiveContext: HiveContext, incrementalDataframe: DataFrame, partitionColumnList: Seq[String], partitionColumns: String): String = {
@@ -185,7 +235,10 @@ object LoadDataToHive {
 
     val upsertDataFrame = columns.foldLeft(joinedDataFrame) {
       (acc: DataFrame, colName: String) =>
-        acc.withColumn(colName + "_j", coalesce(col(colName + "_i"), col(colName)))
+        acc.withColumn(colName + "_j", hasColumn(joinedDataFrame, colName + "_i") match {
+          case true => coalesce(col(colName + "_i"), col(colName))
+          case false => col(colName)
+        })
           .drop(colName)
           .drop(colName + "_i")
           .withColumnRenamed(colName + "_j", colName)
@@ -198,6 +251,9 @@ object LoadDataToHive {
       (acc: DataFrame, colName: String) =>
         acc.drop(colName)
     }
+
+    logger.info("******materializedDataframe incrementalData Table******* with " + materializedDataframe.count() + " rows")
+    materializedDataframe.show()
 
     val deleteUpsertFreeDataframe = materializedDataframe.filter(materializedDataframe(headerOperation).notEqual(deleteIndicator))
     deleteUpsertFreeDataframe

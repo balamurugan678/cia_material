@@ -2,7 +2,6 @@ package com.poc.sample
 
 import com.fasterxml.jackson.databind.{DeserializationFeature, ObjectMapper}
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
-import com.fasterxml.jackson.module.scala.experimental.ScalaObjectMapper
 import com.poc.sample.Models.{AvroSchema, Fields}
 import org.apache.spark.sql.hive.HiveContext
 import org.apache.spark.sql.types.StructType
@@ -42,15 +41,12 @@ object IncrementalTableSetUp {
 
     hiveContext.sql(incrementalExtTable)
 
-    val incrementalDataframe = hiveContext.table(incrementalTableName)
-    println("******Incremental External Table******* with " + incrementalDataframe.count() + " rows")
-    incrementalDataframe.show()
   }
 
 
   def buildAvroSchema(hiveDatabase: String, rawSchema: StructType, baseTableName: String) = {
     val schemaList = rawSchema.fields.map(field => Fields(field.name, field.name, field.dataType.typeName))
-    val mapper = new ObjectMapper with ScalaObjectMapper
+    val mapper = new ObjectMapper
     mapper.registerModule(DefaultScalaModule)
     mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
     val avroSchema = AvroSchema("record", baseTableName, hiveDatabase, schemaList)
