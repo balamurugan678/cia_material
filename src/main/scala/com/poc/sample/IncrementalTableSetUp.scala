@@ -1,7 +1,10 @@
 package com.poc.sample
 
+import java.time.LocalDateTime
+
 import com.fasterxml.jackson.databind.{DeserializationFeature, ObjectMapper}
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
+import com.poc.sample.IncrementalRunner.logger
 import com.poc.sample.Models.{AvroSchema, Fields}
 import org.apache.spark.sql.hive.HiveContext
 import org.apache.spark.sql.types.StructType
@@ -24,7 +27,6 @@ object IncrementalTableSetUp {
 
     val avroSchemaString: String = buildAvroSchema(hiveDatabase, rawSchema, baseTableName)
 
-
     hiveContext.sql(s"USE $hiveDatabase")
 
     hiveContext.sql(s"DROP TABLE IF EXISTS $incrementalTableName")
@@ -41,11 +43,15 @@ object IncrementalTableSetUp {
 
     hiveContext.sql(incrementalExtTable)
 
+    logger.warn(s"Incremental external table has been created with the name ${incrementalTableName} and the delta files have been loaded from ${pathToLoad}")
   }
 
 
   def buildAvroSchema(hiveDatabase: String, rawSchema: StructType, baseTableName: String) = {
-    val schemaList = rawSchema.fields.map(field => Fields(field.name, field.name, field.dataType.typeName))
+    val schemaList = rawSchema.fields.map(field => Fields(field.name, field.name, field.dataType.typeName match {
+      case "integer" => "int"
+      case others => others
+    }))
     val mapper = new ObjectMapper
     mapper.registerModule(DefaultScalaModule)
     mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)

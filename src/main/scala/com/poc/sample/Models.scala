@@ -8,7 +8,7 @@ object Models {
 
   case class MaterialConfig(hiveDatabase: String, baseTableName: String, incrementalTableName: String, pathToLoad: String, processedPathToMove: String,
                             uniqueKeyList: String, partitionColumns: String, seqColumn: String, versionIndicator: String,
-                            headerOperation: String, deleteIndicator: String, mandatoryMetaData: String)
+                            headerOperation: String, deleteIndicator: String, mandatoryMetaData: String, rowNumber: String)
 
   case class Item(id: String, name: String)
 
