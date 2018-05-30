@@ -1,5 +1,6 @@
 package com.poc.sample
 
+import java.io.FileNotFoundException
 import java.time.LocalDateTime
 
 import com.poc.sample.Models.{CIAMaterialConfig, MaterialConfig}
@@ -13,6 +14,7 @@ import org.json4s.jackson.JsonMethods.parse
 import org.slf4j.LoggerFactory
 
 import scala.io.Source
+import scala.util.{Failure, Success}
 
 object IncrementalRunner {
 
@@ -53,21 +55,21 @@ object IncrementalRunner {
     val partitionColumns = materialConfig.partitionColumns.split('|').toSeq
     val mandatoryMetaData = materialConfig.mandatoryMetaData.split('|').toSeq
 
-    //try{
     logger.warn(s"Materialization started at ${LocalDateTime.now} for the table ${materialConfig.baseTableName} and the delta files would be picked from ${materialConfig.pathToLoad}")
-    IncrementalTableSetUp.loadIncrementalData(materialConfig, hiveContext)
-    val ciaNotification = LoadDataToHive.reconcile(materialConfig, partitionColumns, uniqueKeyList, mandatoryMetaData, hiveContext)
-    MaterializationCloseDown.dropIncrementalExtTable(materialConfig, hiveContext)
-    MaterializationCloseDown.moveFilesToProcessedDirectory(materialConfig, hadoopConfig, hadoopFileSystem)
-    logger.warn(s"Materialization finished at ${LocalDateTime.now} for the table ${materialConfig.baseTableName} and the cleaned up happened!!!")
-    //MaterializationNotification.persistNotificationInES(sparkContext, ciaNotification)
-    /*}
-    catch {
-      case ex:Exception => println(s"No delta avro files present for the table $baseTableName at the path $pathToLoad. Moving onto the next config!!")
+    IncrementalTableSetUp.loadIncrementalData(materialConfig, hiveContext) match {
+      case Success(success) => {
+        val ciaNotification = LoadDataToHive.reconcile(materialConfig, partitionColumns, uniqueKeyList, mandatoryMetaData, hiveContext)
+        MaterializationCloseDown.dropIncrementalExtTable(materialConfig, hiveContext)
+        MaterializationCloseDown.moveFilesToProcessedDirectory(materialConfig, hadoopConfig, hadoopFileSystem)
+        logger.warn(s"Materialization finished at ${LocalDateTime.now} for the table ${materialConfig.baseTableName} and the cleaned up happened!!!")
+        //MaterializationNotification.persistNotificationInES(sparkContext, ciaNotification)
+      }
+      case Failure(ex) => {
+        ex match {
+          case fne: FileNotFoundException => logger.error(s"No delta avro files present for the table ${materialConfig.baseTableName} at the path ${materialConfig.pathToLoad}. Moving onto the next config!!")
+        }
+      }
     }
-    finally {
-      println(s"Materialization is done for the table $baseTableName with the change data at $pathToLoad. Moving onto the next config!!")
-    }*/
   }
 
   def parseMaterializationConfig(sparkContext: SparkContext) = {

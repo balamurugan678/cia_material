@@ -6,4 +6,4 @@
 ```
 cd /Users/bguru1/balamurugan/My_Workspace/cia_material
 
-spark-submit --class "com.poc.sample.IncrementalRunner" --master local[4]  --conf spark.configFileLocation=/Users/bguru1/balamurugan/Datasets/materialization-config.json --conf spark.es.nodes=localhost --conf spark.es.port=9200 CIA-Materialization.jar
+spark-submit --class "com.poc.sample.IncrementalRunner" --master local[4]  --conf spark.configFileLocation=/Users/bguru1/balamurugan/Datasets/materialization-config.json --conf spark.es.nodes=localhost --conf spark.es.port=9200 --driver-java-options "-Dlog4j.configuration=file:///Users/bguru1/balamurugan/My_Workspace/cia_material/src/main/resources/log4j.properties"  CIA-Materialization.jar
