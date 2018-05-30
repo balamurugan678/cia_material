@@ -21,23 +21,21 @@ object LoadDataToHive {
 
   val logger = LoggerFactory.getLogger(LoadDataToHive.getClass)
 
-  def reconcile(pathToLoad: String, hiveDatabase: String, baseTableName: String, incrementalTableName: String, uniqueKeyList: Seq[String], partitionColumnList: Seq[String], seqColumn: String, versionIndicator: String, headerOperation: String, deleteIndicator: String, mandatoryMetaData: Seq[String], hiveContext: HiveContext, materialConfig: MaterialConfig): CIANotification = {
+  def reconcile(materialConfig: MaterialConfig, partitionColumnList: Seq[String], uniqueKeyList: Seq[String], mandatoryMetaData: Seq[String], hiveContext: HiveContext): CIANotification = {
 
-    hiveContext.sql(s"use $hiveDatabase")
-
-    val incrementalDataframe = hiveContext.table(incrementalTableName)
-
-    val incrementalUBFreeDataframe = incrementalDataframe.filter(incrementalDataframe(headerOperation).notEqual("UB"))
+    hiveContext.sql(s"use ${materialConfig.hiveDatabase}")
+    val incrementalDataframe = hiveContext.table(materialConfig.incrementalTableName)
+    val incrementalUBFreeDataframe = incrementalDataframe.filter(incrementalDataframe(materialConfig.headerOperation).notEqual("UB"))
 
     val partitionColumns = partitionColumnList.mkString(",")
-    val ciaNotification: CIANotification = versionIndicator match {
+    val ciaNotification: CIANotification = materialConfig.versionIndicator match {
       case "Y" =>
-        val currentTimestamp = materializeAndKeepVersion(baseTableName, hiveContext, incrementalUBFreeDataframe, partitionColumnList, partitionColumns)
-        val notification: CIANotification = buildNotificationObject(pathToLoad, hiveDatabase, baseTableName, seqColumn, incrementalUBFreeDataframe, currentTimestamp)
+        val currentTimestamp = materializeAndKeepVersion(materialConfig.baseTableName, hiveContext, incrementalUBFreeDataframe, partitionColumnList, partitionColumns)
+        val notification: CIANotification = buildNotificationObject(materialConfig.pathToLoad, materialConfig.hiveDatabase, materialConfig.baseTableName, materialConfig.seqColumn, incrementalUBFreeDataframe, currentTimestamp)
         notification
       case "N" =>
-        val currentTimestamp = materializeWithLatestVersion(hiveDatabase, baseTableName, incrementalTableName, uniqueKeyList, partitionColumnList, seqColumn, hiveContext, incrementalDataframe, partitionColumns, headerOperation, deleteIndicator, mandatoryMetaData, materialConfig)
-        val notification: CIANotification = buildNotificationObject(pathToLoad, hiveDatabase, baseTableName, seqColumn, incrementalUBFreeDataframe, currentTimestamp)
+        val currentTimestamp = materializeWithLatestVersion(materialConfig.hiveDatabase, materialConfig.baseTableName, materialConfig.incrementalTableName, uniqueKeyList, partitionColumnList, materialConfig.seqColumn, hiveContext, incrementalDataframe, partitionColumns, materialConfig.headerOperation, materialConfig.deleteIndicator, mandatoryMetaData, materialConfig)
+        val notification: CIANotification = buildNotificationObject(materialConfig.pathToLoad, materialConfig.hiveDatabase, materialConfig.baseTableName, materialConfig.seqColumn, incrementalUBFreeDataframe, currentTimestamp)
         notification
     }
 
@@ -62,9 +60,8 @@ object LoadDataToHive {
 
   def materializeWithLatestVersion(hiveDatabase: String, baseTableName: String, incrementalTableName: String, uniqueKeyList: Seq[String], partitionColumnList: Seq[String], seqColumn: String, hiveContext: HiveContext, incrementalDataframe: DataFrame, partitionColumns: String, headerOperation: String, deleteIndicator: String, mandatoryMetaData: Seq[String], materialConfig: MaterialConfig): String = {
 
-    val baseDataFrame = if (partitionColumns.size == 0) {
+    val baseDataFrame = if (partitionColumns.isEmpty) {
       val baseTableDataframe = hiveContext.table(baseTableName)
-
       val fieldList = scala.collection.mutable.MutableList[AdditionalFields]()
       var alterIndicator = false
       breakable {
@@ -103,18 +100,13 @@ object LoadDataToHive {
       case 0 => getUpsertBaseTableDataNoUniqueKeys(hiveContext, baseDataFrame, incrementalDataframe, uniqueKeyList, seqColumn, headerOperation, deleteIndicator, mandatoryMetaData, materialConfig)
       case _ => getUpsertBaseTableData(hiveContext, baseDataFrame, incrementalDataframe, uniqueKeyList, seqColumn, headerOperation, deleteIndicator)
     }
-
-    //upsertDataframe.show()
     logger.warn(s"Upserted data have been found for the table ${baseTableName} and the hive tables would be loaded now")
-
-    val currentTimestamp = if (partitionColumns.size == 0) {
+    val currentTimestamp = if (partitionColumns.isEmpty) {
       writeUpsertDataBackToBaseTableWithoutPartitions(baseTableName, "overwrite", upsertDataframe)
     } else {
       writeUpsertDataBackToBasePartitions(baseTableName, partitionColumns, "overwrite", upsertDataframe)
     }
-
     currentTimestamp
-
   }
 
 
@@ -130,12 +122,10 @@ object LoadDataToHive {
   }
 
   def materializeAndKeepVersion(baseTableName: String, hiveContext: HiveContext, incrementalDataframe: DataFrame, partitionColumnList: Seq[String], partitionColumns: String): String = {
-
     val currentTimestamp = partitionColumnList match {
       case Nil => writeUpsertDataBackToBaseTableWithoutPartitions(baseTableName, "append", incrementalDataframe)
       case _ => writeUpsertDataBackToBasePartitions(baseTableName, partitionColumns, "append", incrementalDataframe)
     }
-
     currentTimestamp
   }
 
@@ -174,9 +164,7 @@ object LoadDataToHive {
       s"""
          |Select $partitionColumns from $incrementalTableName \n
        """.stripMargin
-
     val incTableParColDF = hiveContext.sql(incTableParColQuery)
-
     val noDuplDF = incTableParColDF.dropDuplicates(partitionColumnList)
     val noDuplList = noDuplDF.select(partitionColumns).map(row => row(0).asInstanceOf[String]).collect()
     val partitionWhereClause = noDuplList.mkString(",")
@@ -185,60 +173,44 @@ object LoadDataToHive {
 
 
   def getUpsertBaseTableDataNoUniqueKeys(hiveContext: HiveContext, baseTableDataframe: DataFrame, incrementalData: DataFrame, uniqueKeyList: Seq[String], seqColumn: String, headerOperation: String, deleteIndicator: String, mandatoryMetaData: Seq[String], materialConfig: MaterialConfig): DataFrame = {
-
     val duplicateFreeIncrementDF = incrementalData.dropDuplicates()
     val tsAppendedIncDF = duplicateFreeIncrementDF.withColumn("modified_timestamp", lit(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(LocalDateTime.now)))
-
     val beforeImageDF = tsAppendedIncDF.filter(tsAppendedIncDF(headerOperation).equalTo("UB"))
     val deleteImageDF = tsAppendedIncDF.filter(tsAppendedIncDF(headerOperation).equalTo(deleteIndicator))
-
     val baseData = mandatoryMetaData.foldLeft(baseTableDataframe) {
       (acc: DataFrame, colName: String) =>
         acc.drop(colName)
     }
-
     val baseTableColumns = baseData.columns
-
     val duplicateFreeBaseData = baseData
       .except(beforeImageDF.select(baseTableColumns.head, baseTableColumns.tail: _*))
       .except(deleteImageDF.select(baseTableColumns.head, baseTableColumns.tail: _*))
-
     val lowercaseMandata = mandatoryMetaData.map(_.toLowerCase)
     val baseDataframeColumns = baseTableDataframe.columns.filterNot(lowercaseMandata.toSet)
-
     val resultDFjoined = baseTableDataframe.join(duplicateFreeBaseData, baseDataframeColumns)
-
     val deleteAndBeforeFreeIncrement = tsAppendedIncDF.filter(tsAppendedIncDF(headerOperation).notEqual(deleteIndicator))
       .filter(tsAppendedIncDF(headerOperation).notEqual("UB"))
-
     val resultDF = resultDFjoined.unionAll(deleteAndBeforeFreeIncrement)
-
     val cleanedUpDF = resultDF.filter(resultDF(headerOperation).notEqual(deleteIndicator))
       .filter(resultDF(headerOperation).notEqual("UB"))
-    cleanedUpDF
+    val windowFunction = Window.partitionBy(baseTableColumns.head, baseTableColumns.tail: _*).orderBy(desc(seqColumn))
+    val duplicateFreeCleanedUpDF = cleanedUpDF.withColumn("rownum", row_number.over(windowFunction)).where("rownum = 1").drop("rownum")
+    duplicateFreeCleanedUpDF
   }
 
 
   def getUpsertBaseTableData(hiveContext: HiveContext, baseTableDataframe: DataFrame, incrementalData: DataFrame, uniqueKeyList: Seq[String], seqColumn: String, headerOperation: String, deleteIndicator: String): DataFrame = {
-
     val incrementalDataFrame = incrementalData.filter(incrementalData(headerOperation).notEqual("UB"))
     val windowFunction = Window.partitionBy(uniqueKeyList.head, uniqueKeyList.tail: _*).orderBy(desc(seqColumn))
     val duplicateFreeIncrementDF = incrementalDataFrame.withColumn("rownum", row_number.over(windowFunction)).where("rownum = 1").drop("rownum")
-
     val tsAppendedIncDF = duplicateFreeIncrementDF.withColumn("modified_timestamp", lit(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(LocalDateTime.now)))
-
     val columns = baseTableDataframe.columns
     val incrementDataFrame = tsAppendedIncDF.toDF(tsAppendedIncDF.columns.map(x => x.trim + "_i"): _*)
-
-
     val joinExprs = uniqueKeyList
       .zip(uniqueKeyList)
       .map { case (c1, c2) => baseTableDataframe(c1) === incrementDataFrame(c2 + "_i") }
       .reduce(_ && _)
-
     val joinedDataFrame = baseTableDataframe.join(incrementDataFrame, joinExprs, "outer")
-
-
     val upsertDataFrame = columns.foldLeft(joinedDataFrame) {
       (acc: DataFrame, colName: String) =>
         acc.withColumn(colName + "_j", hasColumn(joinedDataFrame, colName + "_i") match {
@@ -249,15 +221,12 @@ object LoadDataToHive {
           .drop(colName + "_i")
           .withColumnRenamed(colName + "_j", colName)
     }
-
     val upsertedColumns = upsertDataFrame.columns
     val additionalColumns = upsertedColumns diff columns
-
     val materializedDataframe = additionalColumns.foldLeft(upsertDataFrame) {
       (acc: DataFrame, colName: String) =>
         acc.drop(colName)
     }
-
     val deleteUpsertFreeDataframe = materializedDataframe.filter(materializedDataframe(headerOperation).notEqual(deleteIndicator))
     deleteUpsertFreeDataframe
   }
