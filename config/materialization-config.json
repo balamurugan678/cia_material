@@ -1,21 +1,39 @@
 {
   "appName": "IncrementalRunner",
+  "environment": "int",
+  "kerberosPrincipal": "hdp59-ss-cia-dev",
+  "kerberosKeyTabLocation": "/home/hdp59-ss-cia-dev/.hdp59-ss-cia-dev-headless.keytab",
   "esHost": "localhost",
   "esPort": "9200",
-  "esIndex": "ciaingestion",	
+  "esIndex": "ciaingestion",
   "materialConfigs": [
     {
       "hiveDatabase": "material",
-      "baseTableName": "base_table",
+      "baseTableName": "base_ifai_table",
       "incrementalTableName": "versioned_part_table",
       "pathToLoad": "hdfs://localhost:9000/target-dir",
       "processedPathToMove": "hdfs://localhost:9000/archive-dir",
-      "uniqueKeyList": "object_id|write_user",
+      "uniqueKeyList": "",
       "partitionColumns": "",
-      "seqColumn": "header__timestamp",
+      "seqColumn": "a_timstamp",
       "versionIndicator": "N",
-      "headerOperation": "A_ENTTYP",
-      "deleteIndicator": "DL"
+      "headerOperation": "a_enttyp",
+      "deleteIndicator": "DL",
+      "mandatoryMetaData": "a_enttyp|a_timstamp|modified_timestamp"
+    },
+    {
+      "hiveDatabase": "material",
+      "baseTableName": "base_ifai_table11",
+      "incrementalTableName": "versioned_part_table11",
+      "pathToLoad": "hdfs://localhost:9000/targeted-dir",
+      "processedPathToMove": "hdfs://localhost:9000/archive-dir",
+      "uniqueKeyList": "",
+      "partitionColumns": "",
+      "seqColumn": "a_timstamp",
+      "versionIndicator": "N",
+      "headerOperation": "a_enttyp",
+      "deleteIndicator": "DL",
+      "mandatoryMetaData": "a_enttyp|a_timstamp|modified_timestamp"
     }
   ]
 }
