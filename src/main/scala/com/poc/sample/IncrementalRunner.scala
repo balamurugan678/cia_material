@@ -29,11 +29,12 @@ object IncrementalRunner {
     val hadoopConfig = sparkContext.hadoopConfiguration
     val hadoopFileSystem = FileSystem.get(hadoopConfig)
     val hiveContext = new HiveContext(sparkContext)
+    val journalControlFields = ciaMaterialConfig.cdcJournalControlFields
 
     keyTabRefresh(ciaMaterialConfig, hadoopConfig)
 
     ciaMaterialConfig.materialConfigs.par.foreach(materialConfig => {
-      materializeTable(hadoopConfig, hadoopFileSystem, sparkContext, hiveContext, materialConfig)
+      materializeTable(hadoopConfig, hadoopFileSystem, sparkContext, hiveContext, materialConfig, journalControlFields)
     })
 
   }
@@ -49,19 +50,22 @@ object IncrementalRunner {
 
   }
 
-  def materializeTable(hadoopConfig: Configuration, hadoopFileSystem: FileSystem, sparkContext: SparkContext, hiveContext: HiveContext, materialConfig: MaterialConfig) = {
+  def materializeTable(hadoopConfig: Configuration, hadoopFileSystem: FileSystem, sparkContext: SparkContext, hiveContext: HiveContext,
+                       materialConfig: MaterialConfig, journalControlFields: String) = {
 
     val uniqueKeyList = materialConfig.uniqueKeyList.split('|').toSeq
     val partitionColumns = materialConfig.partitionColumns.split('|').toSeq
     val mandatoryMetaData = materialConfig.mandatoryMetaData.split('|').toSeq
+    val controlFields: Seq[String] = journalControlFields.split('|').toSeq.map(_.toLowerCase)
 
     logger.warn(s"Materialization started at ${LocalDateTime.now} for the table ${materialConfig.baseTableName} and the delta files would be picked from ${materialConfig.pathToLoad}")
-    IncrementalTableSetUp.loadIncrementalData(materialConfig, hiveContext) match {
+    IncrementalTableSetUp.loadIncrementalData(materialConfig, hiveContext, controlFields) match {
       case Success(success) => {
         val ciaNotification = LoadDataToHive.reconcile(materialConfig, partitionColumns, uniqueKeyList, mandatoryMetaData, hiveContext)
         MaterializationCloseDown.dropIncrementalExtTable(materialConfig, hiveContext)
         MaterializationCloseDown.moveFilesToProcessedDirectory(materialConfig, hadoopConfig, hadoopFileSystem)
         logger.warn(s"Materialization finished at ${LocalDateTime.now} for the table ${materialConfig.baseTableName} and the cleaned up happened!!!")
+        //Commented as we don't have elasticsearch at the moment
         //MaterializationNotification.persistNotificationInES(sparkContext, ciaNotification)
       }
       case Failure(ex) => {

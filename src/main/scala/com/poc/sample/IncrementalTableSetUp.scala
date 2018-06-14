@@ -15,12 +15,14 @@ object IncrementalTableSetUp {
 
   val logger = LoggerFactory.getLogger(IncrementalTableSetUp.getClass)
 
-  def loadIncrementalData(materialConfig: MaterialConfig, hiveContext: HiveContext): Try[String] = {
+  def loadIncrementalData(materialConfig: MaterialConfig, hiveContext: HiveContext, controlFields: Seq[String]): Try[String] = {
 
     val hiveDatabase = materialConfig.hiveDatabase
     val baseTableName = materialConfig.baseTableName
     val incrementalTableName = materialConfig.incrementalTableName
     val pathToLoad = materialConfig.pathToLoad
+    val shouldCreateBaseTable = materialConfig.createBaseTable
+
 
     try {
       val incrementalData = hiveContext
@@ -29,6 +31,10 @@ object IncrementalTableSetUp {
         .load(pathToLoad)
 
       val rawSchema = incrementalData.schema
+
+      if(shouldCreateBaseTable)
+        createBaseTable(materialConfig, hiveContext, rawSchema, controlFields)
+
       val schemaString = rawSchema.fields.map(field => field.name.toLowerCase().replaceAll("""^_""", "").concat(" ").concat(field.dataType.typeName match {
         case "integer" | "Long" | "long" => "bigint"
         case others => others
@@ -56,16 +62,56 @@ object IncrementalTableSetUp {
     }
   }
 
+  def createBaseTable(materialConfig: MaterialConfig, hiveContext: HiveContext, rawSchema: StructType, controlFields: Seq[String]) : Try[String] = {
+    val hiveDatabase = materialConfig.hiveDatabase
+    val baseTableName = materialConfig.baseTableName
+    val controlFieldsToRemove = controlFields.filter(field => !materialConfig.mandatoryMetaData.contains(field.toLowerCase))
+    val baseTableSchemaFields = rawSchema.fields.filter{ field =>
+      !controlFieldsToRemove.contains(field.name.toLowerCase)
+    }
+
+    try {
+      val baseTableSchemaAsString = buildBaseTableAvroSchema(hiveDatabase, baseTableSchemaFields, baseTableName)
+      hiveContext.sql(s"USE $hiveDatabase")
+      hiveContext.sql(s"DROP TABLE IF EXISTS $baseTableName")
+      val baseTable =
+        s"""
+           |Create table $baseTableName \n
+           |ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.avro.AvroSerDe' \n
+           | Stored As Avro \n
+           |-- inputformat 'org.apache.hadoop.hive.ql.io.avro.AvroContainerInputFormat' \n
+           | -- outputformat 'org.apache.hadoop.hive.ql.io.avro.AvroContainerOutputFormat' \n
+           |TBLPROPERTIES('avro.schema.literal' = '$baseTableSchemaAsString')
+       """.stripMargin
+      hiveContext.sql(baseTable)
+      logger.debug(s"Base external table has been created with the name ${baseTable}")
+      Success("Success")
+    } catch {
+      case ex: FileNotFoundException => Failure(ex)
+    }
+  }
+
+  def buildBaseTableAvroSchema(hiveDatabase: String, baseTableSchemaFields: Array[StructField], baseTableName: String) = {
+    val schemaList: Array[Fields] = baseTableSchemaFields.map(field => Fields(field.name, field.name, field.dataType.typeName match {
+      case "integer" => "int"
+      case others => others
+    }))
+    buildAvroSchemaJsonString(hiveDatabase, baseTableName, schemaList)
+  }
 
   def buildAvroSchema(hiveDatabase: String, rawSchema: StructType, baseTableName: String) = {
     val schemaList = rawSchema.fields.map(field => Fields(field.name, field.name, field.dataType.typeName match {
       case "integer" => "int"
       case others => others
     }))
+    buildAvroSchemaJsonString(hiveDatabase, baseTableName, schemaList)
+  }
+
+  def buildAvroSchemaJsonString(hiveDatabase: String, tableName: String, schemaList: Array[Fields]): String = {
     val mapper = new ObjectMapper
     mapper.registerModule(DefaultScalaModule)
     mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-    val avroSchema = AvroSchema("record", baseTableName, hiveDatabase, schemaList)
+    val avroSchema = AvroSchema("record", tableName, hiveDatabase, schemaList)
     val avroSchemaString = mapper.writeValueAsString(avroSchema)
     avroSchemaString
   }
