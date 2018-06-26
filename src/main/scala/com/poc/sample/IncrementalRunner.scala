@@ -34,7 +34,7 @@ object IncrementalRunner {
     keyTabRefresh(ciaMaterialConfig, hadoopConfig)
 
     ciaMaterialConfig.materialConfigs.par.foreach(materialConfig => {
-      materializeTable(hadoopConfig, hadoopFileSystem, sparkContext, hiveContext, materialConfig, journalControlFields)
+      materializeTable(hadoopConfig, hadoopFileSystem, sparkContext, hiveContext, materialConfig, journalControlFields, ciaMaterialConfig.esStatusIndicator, ciaMaterialConfig)
     })
 
   }
@@ -51,29 +51,42 @@ object IncrementalRunner {
   }
 
   def materializeTable(hadoopConfig: Configuration, hadoopFileSystem: FileSystem, sparkContext: SparkContext, hiveContext: HiveContext,
-                       materialConfig: MaterialConfig, journalControlFields: String) = {
+                       materialConfig: MaterialConfig, journalControlFields: String, esStatusIndicator: Boolean, ciaMaterialConfig: CIAMaterialConfig) = {
 
-    val uniqueKeyList = materialConfig.uniqueKeyList.split('|').toSeq
-    val partitionColumns = materialConfig.partitionColumns.split('|').toSeq
-    val mandatoryMetaData = materialConfig.mandatoryMetaData.split('|').toSeq
+    val matConfig: MaterialConfig = findAndOverrideProperties(materialConfig, ciaMaterialConfig)
+
+    val uniqueKeyList = matConfig.uniqueKeyList.split('|').toSeq
+    val partitionColumns = matConfig.partitionColumns.split('|').toSeq
+    val mandatoryMetaData = matConfig.mandatoryMetaData.split('|').toSeq
     val controlFields: Seq[String] = journalControlFields.split('|').toSeq.map(_.toLowerCase)
 
-    logger.warn(s"Materialization started at ${LocalDateTime.now} for the table ${materialConfig.baseTableName} and the delta files would be picked from ${materialConfig.pathToLoad}")
-    IncrementalTableSetUp.loadIncrementalData(materialConfig, hiveContext, controlFields) match {
+    logger.warn(s"Materialization started at ${LocalDateTime.now} for the table ${matConfig.baseTableName} and the delta files would be picked from ${matConfig.pathToLoad}")
+    IncrementalTableSetUp.loadIncrementalData(matConfig, hiveContext, controlFields) match {
       case Success(success) => {
-        val ciaNotification = LoadDataToHive.reconcile(materialConfig, partitionColumns, uniqueKeyList, mandatoryMetaData, hiveContext)
-        MaterializationCloseDown.dropIncrementalExtTable(materialConfig, hiveContext)
-        MaterializationCloseDown.moveFilesToProcessedDirectory(materialConfig, hadoopConfig, hadoopFileSystem)
-        logger.warn(s"Materialization finished at ${LocalDateTime.now} for the table ${materialConfig.baseTableName} and the cleaned up happened!!!")
-        //Commented as we don't have elasticsearch at the moment
-        //MaterializationNotification.persistNotificationInES(sparkContext, ciaNotification)
+        val ciaNotification = LoadDataToHive.reconcile(matConfig, partitionColumns, uniqueKeyList, mandatoryMetaData, hiveContext)
+        MaterializationCloseDown.dropIncrementalExtTable(matConfig, hiveContext)
+        MaterializationCloseDown.moveFilesToProcessedDirectory(matConfig, hadoopConfig, hadoopFileSystem)
+        logger.warn(s"Materialization finished at ${LocalDateTime.now} for the table ${matConfig.baseTableName} and the clean up happened!!!")
+        if (esStatusIndicator)
+          MaterializationNotification.persistNotificationInES(sparkContext, ciaNotification)
       }
       case Failure(ex) => {
         ex match {
-          case fne: FileNotFoundException => logger.error(s"No delta avro files present for the table ${materialConfig.baseTableName} at the path ${materialConfig.pathToLoad}. Moving onto the next config!!")
+          case fne: FileNotFoundException => logger.error(s"No delta avro files present for the table ${matConfig.baseTableName} at the path ${matConfig.pathToLoad}. Moving onto the next config!!")
         }
       }
     }
+  }
+
+  def findAndOverrideProperties(materialConfig: MaterialConfig, ciaMaterialConfig: CIAMaterialConfig) = {
+    val matConfig = ciaMaterialConfig.overrideIndicator match {
+      case "Y" =>
+        materialConfig.copy(createBaseTable = ciaMaterialConfig.createBaseTable, seqColumn = ciaMaterialConfig.seqColumn, versionIndicator = ciaMaterialConfig.versionIndicator,
+          headerOperation = ciaMaterialConfig.headerOperation, deleteIndicator = ciaMaterialConfig.deleteIndicator, beforeImageIndicator = ciaMaterialConfig.beforeImageIndicator,
+          mandatoryMetaData = ciaMaterialConfig.mandatoryMetaData)
+      case _ => materialConfig
+    }
+    matConfig
   }
 
   def parseMaterializationConfig(sparkContext: SparkContext) = {

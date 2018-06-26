@@ -6,7 +6,7 @@ import com.fasterxml.jackson.databind.{DeserializationFeature, ObjectMapper}
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
 import com.poc.sample.Models.{AvroSchema, Fields, MaterialConfig}
 import org.apache.spark.sql.hive.HiveContext
-import org.apache.spark.sql.types.StructType
+import org.apache.spark.sql.types.{StructField, StructType}
 import org.slf4j.LoggerFactory
 
 import scala.util.{Failure, Success, Try}
