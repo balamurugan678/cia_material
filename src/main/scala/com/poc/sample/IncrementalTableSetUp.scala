@@ -17,6 +17,9 @@ object IncrementalTableSetUp {
 
   def loadIncrementalData(materialConfig: MaterialConfig, hiveContext: HiveContext, controlFields: Seq[String]): Try[String] = {
 
+    if (materialConfig.createIncrementalTable)
+      return Success("Success")
+
     val hiveDatabase = materialConfig.hiveDatabase
     val baseTableName = materialConfig.baseTableName
     val incrementalTableName = materialConfig.incrementalTableName

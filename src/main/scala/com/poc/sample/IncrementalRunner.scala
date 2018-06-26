@@ -64,7 +64,8 @@ object IncrementalRunner {
     IncrementalTableSetUp.loadIncrementalData(matConfig, hiveContext, controlFields) match {
       case Success(success) => {
         val ciaNotification = LoadDataToHive.reconcile(matConfig, partitionColumns, uniqueKeyList, mandatoryMetaData, hiveContext)
-        MaterializationCloseDown.dropIncrementalExtTable(matConfig, hiveContext)
+        if (!materialConfig.createIncrementalTable)
+          MaterializationCloseDown.dropIncrementalExtTable(matConfig, hiveContext)
         MaterializationCloseDown.moveFilesToProcessedDirectory(matConfig, hadoopConfig, hadoopFileSystem)
         logger.warn(s"Materialization finished at ${LocalDateTime.now} for the table ${matConfig.baseTableName} and the clean up happened!!!")
         if (esStatusIndicator)

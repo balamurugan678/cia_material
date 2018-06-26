@@ -4,12 +4,12 @@ import com.fasterxml.jackson.annotation.JsonProperty
 
 object Models {
 
-  case class CIAMaterialConfig(appName: String, environment: String, kerberosPrincipal: String, kerberosKeyTabLocation: String, esStatusIndicator: Boolean, esHost: String, esPort: String, esIndex: String, cdcJournalControlFields:String,
-                               createBaseTable:Boolean, seqColumn: String, versionIndicator: String, headerOperation: String, deleteIndicator: String,
-                               beforeImageIndicator: String, mandatoryMetaData: String, overrideIndicator:String, materialConfigs: List[MaterialConfig]
+  case class CIAMaterialConfig(appName: String, environment: String, kerberosPrincipal: String, kerberosKeyTabLocation: String, esStatusIndicator: Boolean, esHost: String, esPort: String, esIndex: String, cdcJournalControlFields: String,
+                               createBaseTable: Boolean, createIncrementalTable: Boolean, seqColumn: String, versionIndicator: String, headerOperation: String, deleteIndicator: String,
+                               beforeImageIndicator: String, mandatoryMetaData: String, overrideIndicator: String, materialConfigs: List[MaterialConfig]
                               )
 
-  case class MaterialConfig(hiveDatabase: String, baseTableName: String, createBaseTable: Boolean, incrementalTableName: String, pathToLoad: String, processedPathToMove: String,
+  case class MaterialConfig(hiveDatabase: String, baseTableName: String, createBaseTable: Boolean, createIncrementalTable: Boolean, incrementalTableName: String, pathToLoad: String, processedPathToMove: String,
                             uniqueKeyList: String, partitionColumns: String, seqColumn: String, versionIndicator: String,
                             headerOperation: String, deleteIndicator: String, beforeImageIndicator: String, mandatoryMetaData: String)
 
