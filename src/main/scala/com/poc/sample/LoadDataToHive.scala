@@ -132,10 +132,15 @@ object LoadDataToHive {
   }
 
   def buildDecimalSchema(decimalTypeString: String): MaterialDecimal = {
-    decimalTypeString match {
-      case "Decimal" => MaterialDecimal("bytes", decimalTypeString.substring(0, decimalTypeString.indexOf("(")), decimalTypeString.substring(decimalTypeString.indexOf("(") + 1, decimalTypeString.indexOf(",")).toInt, decimalTypeString.substring(decimalTypeString.indexOf(",") + 1, decimalTypeString.indexOf(")")).toInt)
-      case _ => MaterialDecimal(decimalTypeString, null, 0, 0)
+    if(decimalTypeString.contains("decimal")) {
+      val one = decimalTypeString.substring(0, decimalTypeString.indexOf("("))
+      val two = decimalTypeString.substring(decimalTypeString.indexOf("(") + 1, decimalTypeString.indexOf(",")).toInt
+      val three = decimalTypeString.substring(decimalTypeString.indexOf(",") + 1, decimalTypeString.indexOf(")")).toInt
+      MaterialDecimal("bytes", one, two, three)
     }
+    else
+      MaterialDecimal(decimalTypeString, null, 0, 0)
+
   }
 
 
