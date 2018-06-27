@@ -16,6 +16,7 @@ import org.slf4j.LoggerFactory
 
 import scala.util.Try
 import scala.util.control.Breaks._
+import scala.util.parsing.json.JSON
 
 object LoadDataToHive {
 
@@ -58,18 +59,18 @@ object LoadDataToHive {
 
   def hasColumn(df: DataFrame, path: String) = Try(df(path)).isSuccess
 
-  def materializeWithLatestVersion(hiveDatabase: String, baseTableName: String, incrementalTableName: String, uniqueKeyList: Seq[String], partitionColumnList: Seq[String], seqColumn: String, hiveContext: HiveContext, incrementalDataframe: DataFrame, partitionColumns: String, headerOperation: String, deleteIndicator: String, beforeImageIndicator:String, mandatoryMetaData: Seq[String], materialConfig: MaterialConfig): String = {
+  def materializeWithLatestVersion(hiveDatabase: String, baseTableName: String, incrementalTableName: String, uniqueKeyList: Seq[String], partitionColumnList: Seq[String], seqColumn: String, hiveContext: HiveContext, incrementalDataframe: DataFrame, partitionColumns: String, headerOperation: String, deleteIndicator: String, beforeImageIndicator: String, mandatoryMetaData: Seq[String], materialConfig: MaterialConfig): String = {
 
     createBaseVersionTable(baseTableName, hiveContext)
     val baseDataFrame = if (partitionColumns.isEmpty) {
       val baseTableDataframe = hiveContext.table(baseTableName)
-      val fieldList = scala.collection.mutable.MutableList[AdditionalFields]()
+      val fieldList = scala.collection.mutable.MutableList[MatDecimalFields]()
       var alterIndicator = false
       breakable {
         mandatoryMetaData.foreach(metadata => {
           if (!hasColumn(baseTableDataframe, metadata)) {
-            val typeWithNullable = Array("string", "null")
-            val fields = AdditionalFields(metadata, metadata, typeWithNullable)
+            val materialDecimal = MaterialDecimal("string", "null", 0, 0)
+            val fields = MatDecimalFields(metadata, metadata, (materialDecimal, "null"))
             fieldList += fields
             alterIndicator = true
           }
@@ -119,16 +120,24 @@ object LoadDataToHive {
     initialTableDataframe
   }
 
-  def buildAvroSchema(hiveDatabase: String, rawSchema: StructType, baseTableName: String, mandatoryMetadataArray: Array[AdditionalFields]) = {
-    val schemaList = rawSchema.fields.map(field => AdditionalFields(field.name, field.name, Array(field.dataType.typeName, "null")))
+  def buildAvroSchema(hiveDatabase: String, rawSchema: StructType, baseTableName: String, mandatoryMetadataArray: Array[MatDecimalFields]) = {
+    val schemaList = rawSchema.fields.map(field => MatDecimalFields(field.name, field.name, (buildDecimalSchema(field.dataType.typeName), "null")))
     val finalSchemaList = schemaList ++ mandatoryMetadataArray
     val mapper = new ObjectMapper
     mapper.registerModule(DefaultScalaModule)
     mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-    val avroSchema = BaseAvroSchema("record", baseTableName, hiveDatabase, finalSchemaList)
+    val avroSchema = MatDecAvroSchema("record", baseTableName, hiveDatabase, finalSchemaList)
     val avroSchemaString = mapper.writeValueAsString(avroSchema)
     avroSchemaString
   }
+
+  def buildDecimalSchema(decimalTypeString: String): MaterialDecimal = {
+    decimalTypeString match {
+      case "Decimal" => MaterialDecimal("bytes", decimalTypeString.substring(0, decimalTypeString.indexOf("(")), decimalTypeString.substring(decimalTypeString.indexOf("(") + 1, decimalTypeString.indexOf(",")).toInt, decimalTypeString.substring(decimalTypeString.indexOf(",") + 1, decimalTypeString.indexOf(")")).toInt)
+      case _ => MaterialDecimal(decimalTypeString, null, 0, 0)
+    }
+  }
+
 
   def materializeAndKeepVersion(baseTableName: String, hiveContext: HiveContext, incrementalDataframe: DataFrame, partitionColumnList: Seq[String], partitionColumns: String): String = {
     val currentTimestamp = partitionColumnList match {
@@ -181,7 +190,7 @@ object LoadDataToHive {
   }
 
 
-  def getUpsertBaseTableDataNoUniqueKeys(hiveContext: HiveContext, baseTableDataframe: DataFrame, incrementalData: DataFrame, uniqueKeyList: Seq[String], seqColumn: String, headerOperation: String, deleteIndicator: String, beforeImageIndicator:String, mandatoryMetaData: Seq[String], materialConfig: MaterialConfig): DataFrame = {
+  def getUpsertBaseTableDataNoUniqueKeys(hiveContext: HiveContext, baseTableDataframe: DataFrame, incrementalData: DataFrame, uniqueKeyList: Seq[String], seqColumn: String, headerOperation: String, deleteIndicator: String, beforeImageIndicator: String, mandatoryMetaData: Seq[String], materialConfig: MaterialConfig): DataFrame = {
     val duplicateFreeIncrementDF = incrementalData.dropDuplicates()
     val tsAppendedIncDF = duplicateFreeIncrementDF.withColumn("modified_timestamp", lit(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(LocalDateTime.now)))
     val beforeImageDF = tsAppendedIncDF.filter(tsAppendedIncDF(headerOperation).equalTo(beforeImageIndicator))
@@ -208,13 +217,15 @@ object LoadDataToHive {
   }
 
 
-  def getUpsertBaseTableData(hiveContext: HiveContext, baseTableDataframe: DataFrame, incrementalData: DataFrame, uniqueKeyList: Seq[String], seqColumn: String, headerOperation: String, deleteIndicator: String, beforeImageIndicator:String): DataFrame = {
+  def getUpsertBaseTableData(hiveContext: HiveContext, baseTableDataframe: DataFrame, incrementalData: DataFrame, uniqueKeyList: Seq[String], seqColumn: String, headerOperation: String, deleteIndicator: String, beforeImageIndicator: String): DataFrame = {
     val incrementalDataFrame = incrementalData.filter(incrementalData(headerOperation).notEqual(beforeImageIndicator))
     val windowFunction = Window.partitionBy(uniqueKeyList.head, uniqueKeyList.tail: _*).orderBy(desc(seqColumn))
     val duplicateFreeIncrementDF = incrementalDataFrame.withColumn("rownum", row_number.over(windowFunction)).where("rownum = 1").drop("rownum")
     val tsAppendedIncDF = duplicateFreeIncrementDF.withColumn("modified_timestamp", lit(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(LocalDateTime.now)))
     val columns = baseTableDataframe.columns
     val incrementDataFrame = tsAppendedIncDF.toDF(tsAppendedIncDF.columns.map(x => x.trim + "_i"): _*)
+    incrementDataFrame.show()
+    baseTableDataframe.show()
     val joinExprs = uniqueKeyList
       .zip(uniqueKeyList)
       .map { case (c1, c2) => baseTableDataframe(c1) === incrementDataFrame(c2 + "_i") }
@@ -230,13 +241,16 @@ object LoadDataToHive {
           .drop(colName + "_i")
           .withColumnRenamed(colName + "_j", colName)
     }
+    upsertDataFrame.show()
     val upsertedColumns = upsertDataFrame.columns
     val additionalColumns = upsertedColumns diff columns
     val materializedDataframe = additionalColumns.foldLeft(upsertDataFrame) {
       (acc: DataFrame, colName: String) =>
         acc.drop(colName)
     }
+
     val deleteUpsertFreeDataframe = materializedDataframe.filter(materializedDataframe(headerOperation).notEqual(deleteIndicator))
+    deleteUpsertFreeDataframe.show()
     deleteUpsertFreeDataframe
   }
 
