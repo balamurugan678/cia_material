@@ -82,7 +82,7 @@ object IncrementalRunner {
   def findAndOverrideProperties(materialConfig: MaterialConfig, ciaMaterialConfig: CIAMaterialConfig) = {
     val matConfig = ciaMaterialConfig.overrideIndicator match {
       case "Y" =>
-        materialConfig.copy(createBaseTable = ciaMaterialConfig.createBaseTable, seqColumn = ciaMaterialConfig.seqColumn, versionIndicator = ciaMaterialConfig.versionIndicator,
+        materialConfig.copy(createBaseTable = ciaMaterialConfig.createBaseTable, createIncrementalTable = ciaMaterialConfig.createIncrementalTable, seqColumn = ciaMaterialConfig.seqColumn,
           headerOperation = ciaMaterialConfig.headerOperation, deleteIndicator = ciaMaterialConfig.deleteIndicator, beforeImageIndicator = ciaMaterialConfig.beforeImageIndicator,
           mandatoryMetaData = ciaMaterialConfig.mandatoryMetaData)
       case _ => materialConfig
@@ -97,5 +97,6 @@ object IncrementalRunner {
     val ciaMaterialConfig = json.extract[CIAMaterialConfig]
     ciaMaterialConfig
   }
+
 
 }

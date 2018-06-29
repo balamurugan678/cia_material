@@ -29,19 +29,9 @@ object LoadDataToHive {
     val incrementalUBFreeDataframe = incrementalDataframe.filter(incrementalDataframe(materialConfig.headerOperation).notEqual(materialConfig.beforeImageIndicator))
 
     val partitionColumns = partitionColumnList.mkString(",")
-    val ciaNotification: CIANotification = materialConfig.versionIndicator match {
-      case "Y" =>
-        val currentTimestamp = materializeAndKeepVersion(materialConfig.baseTableName, hiveContext, incrementalUBFreeDataframe, partitionColumnList, partitionColumns)
-        val notification: CIANotification = buildNotificationObject(materialConfig.pathToLoad, materialConfig.hiveDatabase, materialConfig.baseTableName, materialConfig.seqColumn, incrementalUBFreeDataframe, currentTimestamp)
-        notification
-      case "N" =>
-        val currentTimestamp = materializeWithLatestVersion(materialConfig.hiveDatabase, materialConfig.baseTableName, materialConfig.incrementalTableName, uniqueKeyList, partitionColumnList, materialConfig.seqColumn, hiveContext, incrementalDataframe, partitionColumns, materialConfig.headerOperation, materialConfig.deleteIndicator, materialConfig.beforeImageIndicator, mandatoryMetaData, materialConfig)
-        val notification: CIANotification = buildNotificationObject(materialConfig.pathToLoad, materialConfig.hiveDatabase, materialConfig.baseTableName, materialConfig.seqColumn, incrementalUBFreeDataframe, currentTimestamp)
-        notification
-    }
-
-    ciaNotification
-
+    val currentTimestamp = materializeWithLatestVersion(materialConfig.hiveDatabase, materialConfig.baseTableName, materialConfig.incrementalTableName, uniqueKeyList, partitionColumnList, materialConfig.seqColumn, hiveContext, incrementalDataframe, partitionColumns, materialConfig.headerOperation, materialConfig.deleteIndicator, materialConfig.beforeImageIndicator, mandatoryMetaData, materialConfig)
+    val notification: CIANotification = buildNotificationObject(materialConfig.pathToLoad, materialConfig.hiveDatabase, materialConfig.baseTableName, materialConfig.seqColumn, incrementalUBFreeDataframe, currentTimestamp)
+    notification
   }
 
 
@@ -64,13 +54,13 @@ object LoadDataToHive {
     createBaseVersionTable(baseTableName, hiveContext)
     val baseDataFrame = if (partitionColumns.isEmpty) {
       val baseTableDataframe = hiveContext.table(baseTableName)
-      val fieldList = scala.collection.mutable.MutableList[MatDecimalFields]()
+      val fieldList = scala.collection.mutable.MutableList[BaseAvroSchema]()
       var alterIndicator = false
       breakable {
         mandatoryMetaData.foreach(metadata => {
           if (!hasColumn(baseTableDataframe, metadata)) {
-            val materialDecimal = MaterialDecimal("string", "null", 0, 0)
-            val fields = MatDecimalFields(metadata, metadata, (materialDecimal, "null"))
+            val materialDecimal = AdditionalFields("string", "null", 0, 0)
+            val fields = BaseAvroSchema(metadata, metadata, ("null", materialDecimal), null)
             fieldList += fields
             alterIndicator = true
           }
@@ -84,7 +74,7 @@ object LoadDataToHive {
         val avroSchemaString = buildAvroSchema(hiveDatabase, baseTableDataframe.schema, baseTableName, fieldList.toArray)
         val incrementalExtTable =
           s"""
-             |ALTER table $baseTableName \n
+             |ALTER table ${hiveDatabase + "." + baseTableName} \n
              |SET TBLPROPERTIES('avro.schema.literal' = '$avroSchemaString')
                      """.stripMargin
         hiveContext.sql(incrementalExtTable)
@@ -102,11 +92,12 @@ object LoadDataToHive {
       case 0 => getUpsertBaseTableDataNoUniqueKeys(hiveContext, baseDataFrame, incrementalDataframe, uniqueKeyList, seqColumn, headerOperation, deleteIndicator, beforeImageIndicator, mandatoryMetaData, materialConfig)
       case _ => getUpsertBaseTableData(hiveContext, baseDataFrame, incrementalDataframe, uniqueKeyList, seqColumn, headerOperation, deleteIndicator, beforeImageIndicator)
     }
+
     logger.warn(s"Upserted data have been found for the table ${baseTableName} and the hive tables would be loaded now")
     val currentTimestamp = if (partitionColumns.isEmpty) {
-      writeUpsertDataBackToBaseTableWithoutPartitions(baseTableName, "overwrite", upsertDataframe, hiveContext)
+      writeUpsertDataBackToBaseTableWithoutPartitions(hiveDatabase, baseTableName, "overwrite", upsertDataframe, hiveContext)
     } else {
-      writeUpsertDataBackToBasePartitions(baseTableName, partitionColumns, "overwrite", upsertDataframe)
+      writeUpsertDataBackToBasePartitions(hiveDatabase, baseTableName, partitionColumns, "overwrite", upsertDataframe)
     }
     currentTimestamp
   }
@@ -120,8 +111,8 @@ object LoadDataToHive {
     initialTableDataframe
   }
 
-  def buildAvroSchema(hiveDatabase: String, rawSchema: StructType, baseTableName: String, mandatoryMetadataArray: Array[MatDecimalFields]) = {
-    val schemaList = rawSchema.fields.map(field => MatDecimalFields(field.name, field.name, (buildDecimalSchema(field.dataType.typeName), "null")))
+  def buildAvroSchema(hiveDatabase: String, rawSchema: StructType, baseTableName: String, mandatoryMetadataArray: Array[BaseAvroSchema]) = {
+    val schemaList = rawSchema.fields.map(field => BaseAvroSchema(field.name, field.name, ("null", buildDecimalSchema(field.dataType.typeName)), null))
     val finalSchemaList = schemaList ++ mandatoryMetadataArray
     val mapper = new ObjectMapper
     mapper.registerModule(DefaultScalaModule)
@@ -131,28 +122,22 @@ object LoadDataToHive {
     avroSchemaString
   }
 
-  def buildDecimalSchema(decimalTypeString: String): MaterialDecimal = {
-    if(decimalTypeString.contains("decimal")) {
-      val one = decimalTypeString.substring(0, decimalTypeString.indexOf("("))
-      val two = decimalTypeString.substring(decimalTypeString.indexOf("(") + 1, decimalTypeString.indexOf(",")).toInt
-      val three = decimalTypeString.substring(decimalTypeString.indexOf(",") + 1, decimalTypeString.indexOf(")")).toInt
-      MaterialDecimal("bytes", one, two, three)
+  def buildDecimalSchema(decimalTypeString: String): AdditionalFields = {
+    if (decimalTypeString.contains("decimal")) {
+      val logicalType = decimalTypeString.substring(0, decimalTypeString.indexOf("("))
+      val precision = decimalTypeString.substring(decimalTypeString.indexOf("(") + 1, decimalTypeString.indexOf(",")).toInt
+      val scale = decimalTypeString.substring(decimalTypeString.indexOf(",") + 1, decimalTypeString.indexOf(")")).toInt
+      AdditionalFields("bytes", logicalType, precision, scale)
     }
-    else
-      MaterialDecimal(decimalTypeString, null, 0, 0)
-
+    else {
+      decimalTypeString match {
+        case "integer" => AdditionalFields("int", null, 0, 0)
+        case others => AdditionalFields(decimalTypeString, null, 0, 0)
+      }
+    }
   }
 
-
-  def materializeAndKeepVersion(baseTableName: String, hiveContext: HiveContext, incrementalDataframe: DataFrame, partitionColumnList: Seq[String], partitionColumns: String): String = {
-    val currentTimestamp = partitionColumnList match {
-      case Nil => writeUpsertDataBackToBaseTableWithoutPartitions(baseTableName, "append", incrementalDataframe, hiveContext)
-      case _ => writeUpsertDataBackToBasePartitions(baseTableName, partitionColumns, "append", incrementalDataframe)
-    }
-    currentTimestamp
-  }
-
-  def writeUpsertDataBackToBaseTableWithoutPartitions(baseTableName: String, writeMode: String, upsertDataframe: DataFrame, hiveContext: HiveContext): String = {
+  def writeUpsertDataBackToBaseTableWithoutPartitions(hiveDatabase: String, baseTableName: String, writeMode: String, upsertDataframe: DataFrame, hiveContext: HiveContext): String = {
     upsertDataframe
       .write
       .format("com.databricks.spark.avro")
@@ -162,7 +147,7 @@ object LoadDataToHive {
     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(LocalDateTime.now)
   }
 
-  def writeUpsertDataBackToBasePartitions(baseTableName: String, partitionColumns: String, writeMode: String, upsertDataframe: DataFrame): String = {
+  def writeUpsertDataBackToBasePartitions(hiveDatabase: String, baseTableName: String, partitionColumns: String, writeMode: String, upsertDataframe: DataFrame): String = {
     upsertDataframe
       .write
       .format("com.databricks.spark.avro")
@@ -229,8 +214,6 @@ object LoadDataToHive {
     val tsAppendedIncDF = duplicateFreeIncrementDF.withColumn("modified_timestamp", lit(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(LocalDateTime.now)))
     val columns = baseTableDataframe.columns
     val incrementDataFrame = tsAppendedIncDF.toDF(tsAppendedIncDF.columns.map(x => x.trim + "_i"): _*)
-    incrementDataFrame.show()
-    baseTableDataframe.show()
     val joinExprs = uniqueKeyList
       .zip(uniqueKeyList)
       .map { case (c1, c2) => baseTableDataframe(c1) === incrementDataFrame(c2 + "_i") }
@@ -246,16 +229,13 @@ object LoadDataToHive {
           .drop(colName + "_i")
           .withColumnRenamed(colName + "_j", colName)
     }
-    upsertDataFrame.show()
     val upsertedColumns = upsertDataFrame.columns
     val additionalColumns = upsertedColumns diff columns
     val materializedDataframe = additionalColumns.foldLeft(upsertDataFrame) {
       (acc: DataFrame, colName: String) =>
         acc.drop(colName)
     }
-
-    val deleteUpsertFreeDataframe = materializedDataframe.filter(materializedDataframe(headerOperation).notEqual(deleteIndicator))
-    deleteUpsertFreeDataframe.show()
+    val deleteUpsertFreeDataframe = materializedDataframe.filter(not(materializedDataframe(headerOperation) <=> deleteIndicator))
     deleteUpsertFreeDataframe
   }
 

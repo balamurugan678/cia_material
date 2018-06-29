@@ -11,12 +11,11 @@
   "createBaseTable":true,
   "createIncrementalTable": false,
   "seqColumn": "a_timstamp",
-  "versionIndicator": "N",
   "headerOperation": "a_enttyp",
   "deleteIndicator": "DL",
   "beforeImageIndicator": "UB",
   "mandatoryMetaData": "a_enttyp|a_timstamp|modified_timestamp",
-  "overrideIndicator": "Y", //On Y, the previous seven properties would be used rather than individual table level
+  "overrideIndicator": "Y",
   "materialConfigs": [
     {
       "hiveDatabase": "material",
@@ -29,7 +28,6 @@
       "uniqueKeyList": "",
       "partitionColumns": "",
       "seqColumn": "a_timstamp",
-      "versionIndicator": "N",
       "headerOperation": "a_enttyp",
       "deleteIndicator": "DL",
       "beforeImageIndicator": "UB",
@@ -46,7 +44,6 @@
       "uniqueKeyList": "",
       "partitionColumns": "",
       "seqColumn": "a_timstamp",
-      "versionIndicator": "N",
       "headerOperation": "a_enttyp",
       "deleteIndicator": "DL",
       "beforeImageIndicator": "UB",
