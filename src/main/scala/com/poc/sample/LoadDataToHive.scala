@@ -26,7 +26,7 @@ object LoadDataToHive {
 
     hiveContext.sql(s"use ${materialConfig.hiveDatabase}")
     val incrementalDataframe = hiveContext.table(materialConfig.incrementalTableName)
-    val incrementalUBFreeDataframe = incrementalDataframe.filter(incrementalDataframe(materialConfig.headerOperation).notEqual(materialConfig.beforeImageIndicator))
+    val incrementalUBFreeDataframe = incrementalDataframe.filter(not(incrementalDataframe(materialConfig.headerOperation) <=> materialConfig.beforeImageIndicator))
 
     val partitionColumns = partitionColumnList.mkString(",")
     val currentTimestamp = materializeWithLatestVersion(materialConfig.hiveDatabase, materialConfig.baseTableName, materialConfig.incrementalTableName, uniqueKeyList, partitionColumnList, materialConfig.seqColumn, hiveContext, incrementalDataframe, partitionColumns, materialConfig.headerOperation, materialConfig.deleteIndicator, materialConfig.beforeImageIndicator, mandatoryMetaData, materialConfig)
@@ -183,8 +183,8 @@ object LoadDataToHive {
   def getUpsertBaseTableDataNoUniqueKeys(hiveContext: HiveContext, baseTableDataframe: DataFrame, incrementalData: DataFrame, uniqueKeyList: Seq[String], seqColumn: String, headerOperation: String, deleteIndicator: String, beforeImageIndicator: String, mandatoryMetaData: Seq[String], materialConfig: MaterialConfig): DataFrame = {
     val duplicateFreeIncrementDF = incrementalData.dropDuplicates()
     val tsAppendedIncDF = duplicateFreeIncrementDF.withColumn("modified_timestamp", lit(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(LocalDateTime.now)))
-    val beforeImageDF = tsAppendedIncDF.filter(tsAppendedIncDF(headerOperation).equalTo(beforeImageIndicator))
-    val deleteImageDF = tsAppendedIncDF.filter(tsAppendedIncDF(headerOperation).equalTo(deleteIndicator))
+    val beforeImageDF = tsAppendedIncDF.filter(tsAppendedIncDF(headerOperation) <=> beforeImageIndicator)
+    val deleteImageDF = tsAppendedIncDF.filter(tsAppendedIncDF(headerOperation) <=> deleteIndicator)
     val baseData = mandatoryMetaData.foldLeft(baseTableDataframe) {
       (acc: DataFrame, colName: String) =>
         acc.drop(colName)
@@ -196,11 +196,11 @@ object LoadDataToHive {
     val lowercaseMandata = mandatoryMetaData.map(_.toLowerCase)
     val baseDataframeColumns = baseTableDataframe.columns.filterNot(lowercaseMandata.toSet)
     val resultDFjoined = baseTableDataframe.join(duplicateFreeBaseData, baseDataframeColumns)
-    val deleteAndBeforeFreeIncrement = tsAppendedIncDF.filter(tsAppendedIncDF(headerOperation).notEqual(deleteIndicator))
-      .filter(tsAppendedIncDF(headerOperation).notEqual(beforeImageIndicator))
+    val deleteAndBeforeFreeIncrement = tsAppendedIncDF.filter(not(tsAppendedIncDF(headerOperation) <=> deleteIndicator))
+      .filter(not(tsAppendedIncDF(headerOperation) <=> beforeImageIndicator))
     val resultDF = resultDFjoined.unionAll(deleteAndBeforeFreeIncrement)
-    val cleanedUpDF = resultDF.filter(resultDF(headerOperation).notEqual(deleteIndicator))
-      .filter(resultDF(headerOperation).notEqual(beforeImageIndicator))
+    val cleanedUpDF = resultDF.filter(not(resultDF(headerOperation) <=> deleteIndicator))
+      .filter(not(resultDF(headerOperation) <=> beforeImageIndicator))
     val windowFunction = Window.partitionBy(baseTableColumns.head, baseTableColumns.tail: _*).orderBy(desc(seqColumn))
     val duplicateFreeCleanedUpDF = cleanedUpDF.withColumn("rownum", row_number.over(windowFunction)).where("rownum = 1").drop("rownum")
     duplicateFreeCleanedUpDF
@@ -208,7 +208,7 @@ object LoadDataToHive {
 
 
   def getUpsertBaseTableData(hiveContext: HiveContext, baseTableDataframe: DataFrame, incrementalData: DataFrame, uniqueKeyList: Seq[String], seqColumn: String, headerOperation: String, deleteIndicator: String, beforeImageIndicator: String): DataFrame = {
-    val incrementalDataFrame = incrementalData.filter(incrementalData(headerOperation).notEqual(beforeImageIndicator))
+    val incrementalDataFrame = incrementalData.filter(not(incrementalData(headerOperation) <=> beforeImageIndicator))
     val windowFunction = Window.partitionBy(uniqueKeyList.head, uniqueKeyList.tail: _*).orderBy(desc(seqColumn))
     val duplicateFreeIncrementDF = incrementalDataFrame.withColumn("rownum", row_number.over(windowFunction)).where("rownum = 1").drop("rownum")
     val tsAppendedIncDF = duplicateFreeIncrementDF.withColumn("modified_timestamp", lit(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(LocalDateTime.now)))
