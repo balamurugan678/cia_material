@@ -15,7 +15,7 @@ object IncrementalTableSetUp {
 
   val logger = LoggerFactory.getLogger(IncrementalTableSetUp.getClass)
 
-  def loadIncrementalData(materialConfig: MaterialConfig, hiveContext: HiveContext, controlFields: Seq[String]): Try[String] = {
+  def loadIncrementalData(hadoopFileSystem: FileSystem, hadoopConfig: Configuration, materialConfig: MaterialConfig, ciaMaterialConfig: CIAMaterialConfig, hiveContext: HiveContext, controlFields: Seq[String]): Try[String] = {
 
     if (materialConfig.createIncrementalTable)
       return Success("Success")
@@ -25,8 +25,8 @@ object IncrementalTableSetUp {
     val incrementalTableName = materialConfig.incrementalTableName
     val pathToLoad = materialConfig.pathToLoad
     val shouldCreateBaseTable = materialConfig.createBaseTable
-
-
+    val attunityUnpackedPath = materialConfig.attunityUnpackedPath
+    val attunityUnpackedArchive = materialConfig.attunityUnpackedArchive
     try {
       val incrementalData = hiveContext
         .read
@@ -35,7 +35,19 @@ object IncrementalTableSetUp {
 
       val rawSchema = incrementalData.schema
 
-      if(shouldCreateBaseTable)
+      if (ciaMaterialConfig.attunityCDCIndicator) {
+        AttunityDataUnpack.unPackEncapsulatedAttunityMessage(hadoopFileSystem, hadoopConfig, hiveContext, pathToLoad, attunityUnpackedPath, attunityUnpackedArchive)
+        logger.warn(s"Encapsulated Files at $incrementalTableName have been unpacked and unpacked files are placed at $pathToLoad")
+      }
+
+      val incrementalFilesPathToLoad =
+        if (ciaMaterialConfig.attunityCDCIndicator)
+          attunityUnpackedPath
+        else
+          pathToLoad
+
+
+      if (shouldCreateBaseTable)
         createBaseTable(materialConfig, hiveContext, rawSchema, controlFields)
 
       val schemaString = rawSchema.fields.map(field => field.name.toLowerCase().replaceAll("""^_""", "").concat(" ").concat(field.dataType.typeName match {
@@ -53,11 +65,12 @@ object IncrementalTableSetUp {
            | Stored As Avro \n
            |-- inputformat 'org.apache.hadoop.hive.ql.io.avro.AvroContainerInputFormat' \n
            | -- outputformat 'org.apache.hadoop.hive.ql.io.avro.AvroContainerOutputFormat' \n
-           |LOCATION '$pathToLoad' \n
+           |LOCATION '$incrementalFilesPathToLoad' \n
            |TBLPROPERTIES('avro.schema.literal' = '$avroSchemaString')
        """.stripMargin
       hiveContext.sql(incrementalExtTable)
       logger.warn(s"Incremental external table has been created with the name ${incrementalTableName} and the delta files have been loaded from ${pathToLoad}")
+      val incrementalDataframe = hiveContext.table(materialConfig.incrementalTableName)
       Success("Success")
     }
     catch {
@@ -65,11 +78,11 @@ object IncrementalTableSetUp {
     }
   }
 
-  def createBaseTable(materialConfig: MaterialConfig, hiveContext: HiveContext, rawSchema: StructType, controlFields: Seq[String]) : Try[String] = {
+  def createBaseTable(materialConfig: MaterialConfig, hiveContext: HiveContext, rawSchema: StructType, controlFields: Seq[String]): Try[String] = {
     val hiveDatabase = materialConfig.hiveDatabase
     val baseTableName = materialConfig.baseTableName
     val controlFieldsToRemove = controlFields.filter(field => !materialConfig.mandatoryMetaData.contains(field.toLowerCase))
-    val baseTableSchemaFields = rawSchema.fields.filter{ field =>
+    val baseTableSchemaFields = rawSchema.fields.filter { field =>
       !controlFieldsToRemove.contains(field.name.toLowerCase)
     }
 
@@ -95,27 +108,37 @@ object IncrementalTableSetUp {
   }
 
   def buildBaseTableAvroSchema(hiveDatabase: String, baseTableSchemaFields: Array[StructField], baseTableName: String) = {
-    val schemaList: Array[Fields] = baseTableSchemaFields.map(field => Fields(field.name, field.name, field.dataType.typeName match {
-      case "integer" => "int"
-      case others => others
-    }))
-    buildAvroSchemaJsonString(hiveDatabase, baseTableName, schemaList)
+    val schemaList: Array[BaseAvroSchema] = baseTableSchemaFields.map(field => BaseAvroSchema(field.name, field.name, ("null", buildDecimalSchema(field.dataType.typeName)), null))
+    buildBaseAvroSchemaJsonString(hiveDatabase, baseTableName, schemaList)
   }
 
   def buildAvroSchema(hiveDatabase: String, rawSchema: StructType, baseTableName: String) = {
-    val schemaList = rawSchema.fields.map(field => Fields(field.name, field.name, field.dataType.typeName match {
-      case "integer" => "int"
-      case others => others
-    }))
-    buildAvroSchemaJsonString(hiveDatabase, baseTableName, schemaList)
+    val schemaList = rawSchema.fields.map(field => BaseAvroSchema(field.name, field.name, ("null", buildDecimalSchema(field.dataType.typeName)), null))
+    buildBaseAvroSchemaJsonString(hiveDatabase, baseTableName, schemaList)
   }
 
-  def buildAvroSchemaJsonString(hiveDatabase: String, tableName: String, schemaList: Array[Fields]): String = {
+  def buildDecimalSchema(decimalTypeString: String): AdditionalFields = {
+    if (decimalTypeString.contains("decimal")) {
+      val logicalType = decimalTypeString.substring(0, decimalTypeString.indexOf("("))
+      val precision = decimalTypeString.substring(decimalTypeString.indexOf("(") + 1, decimalTypeString.indexOf(",")).toInt
+      val scale = decimalTypeString.substring(decimalTypeString.indexOf(",") + 1, decimalTypeString.indexOf(")")).toInt
+      AdditionalFields("bytes", logicalType, precision, scale)
+    }
+    else {
+      decimalTypeString match {
+        case "integer" => AdditionalFields("int", null, 0, 0)
+        case others => AdditionalFields(decimalTypeString, null, 0, 0)
+      }
+    }
+  }
+
+  def buildBaseAvroSchemaJsonString(hiveDatabase: String, tableName: String, schemaList: Array[BaseAvroSchema]): String = {
     val mapper = new ObjectMapper
     mapper.registerModule(DefaultScalaModule)
     mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false)
-    val avroSchema = AvroSchema("record", tableName, hiveDatabase, schemaList)
+    val avroSchema = MatDecAvroSchema("record", tableName, hiveDatabase, schemaList)
     val avroSchemaString = mapper.writeValueAsString(avroSchema)
     avroSchemaString
   }
+
 }

@@ -61,12 +61,12 @@ object IncrementalRunner {
     val controlFields: Seq[String] = journalControlFields.split('|').toSeq.map(_.toLowerCase)
 
     logger.warn(s"Materialization started at ${LocalDateTime.now} for the table ${matConfig.baseTableName} and the delta files would be picked from ${matConfig.pathToLoad}")
-    IncrementalTableSetUp.loadIncrementalData(matConfig, hiveContext, controlFields) match {
+    IncrementalTableSetUp.loadIncrementalData(hadoopFileSystem, hadoopConfig, matConfig, ciaMaterialConfig, hiveContext, controlFields) match {
       case Success(success) => {
         val ciaNotification = LoadDataToHive.reconcile(matConfig, partitionColumns, uniqueKeyList, mandatoryMetaData, hiveContext)
         if (!materialConfig.createIncrementalTable)
           MaterializationCloseDown.dropIncrementalExtTable(matConfig, hiveContext)
-        MaterializationCloseDown.moveFilesToProcessedDirectory(matConfig, hadoopConfig, hadoopFileSystem)
+        MaterializationCloseDown.moveFilesToProcessedDirectory(matConfig, ciaMaterialConfig, hadoopConfig, hadoopFileSystem)
         logger.warn(s"Materialization finished at ${LocalDateTime.now} for the table ${matConfig.baseTableName} and the clean up happened!!!")
         if (esStatusIndicator)
           MaterializationNotification.persistNotificationInES(sparkContext, ciaNotification)
