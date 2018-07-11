@@ -4,7 +4,9 @@ import java.io.FileNotFoundException
 
 import com.fasterxml.jackson.databind.{DeserializationFeature, ObjectMapper}
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
-import com.poc.sample.Models.{AvroSchema, Fields, MaterialConfig}
+import com.poc.sample.Models._
+import org.apache.hadoop.conf.Configuration
+import org.apache.hadoop.fs.FileSystem
 import org.apache.spark.sql.hive.HiveContext
 import org.apache.spark.sql.types.{StructField, StructType}
 import org.slf4j.LoggerFactory
@@ -28,12 +30,6 @@ object IncrementalTableSetUp {
     val attunityUnpackedPath = materialConfig.attunityUnpackedPath
     val attunityUnpackedArchive = materialConfig.attunityUnpackedArchive
     try {
-      val incrementalData = hiveContext
-        .read
-        .format("com.databricks.spark.avro")
-        .load(pathToLoad)
-
-      val rawSchema = incrementalData.schema
 
       if (ciaMaterialConfig.attunityCDCIndicator) {
         AttunityDataUnpack.unPackEncapsulatedAttunityMessage(hadoopFileSystem, hadoopConfig, hiveContext, pathToLoad, attunityUnpackedPath, attunityUnpackedArchive)
@@ -46,6 +42,12 @@ object IncrementalTableSetUp {
         else
           pathToLoad
 
+      val incrementalData = hiveContext
+        .read
+        .format("com.databricks.spark.avro")
+        .load(incrementalFilesPathToLoad)
+
+      val rawSchema = incrementalData.schema
 
       if (shouldCreateBaseTable)
         createBaseTable(materialConfig, hiveContext, rawSchema, controlFields)
@@ -70,7 +72,6 @@ object IncrementalTableSetUp {
        """.stripMargin
       hiveContext.sql(incrementalExtTable)
       logger.warn(s"Incremental external table has been created with the name ${incrementalTableName} and the delta files have been loaded from ${pathToLoad}")
-      val incrementalDataframe = hiveContext.table(materialConfig.incrementalTableName)
       Success("Success")
     }
     catch {

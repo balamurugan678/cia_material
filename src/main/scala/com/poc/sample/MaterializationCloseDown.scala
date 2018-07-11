@@ -1,10 +1,10 @@
 package com.poc.sample
 
-import com.poc.sample.LoadDataToHive.logger
-import com.poc.sample.Models.MaterialConfig
+import com.poc.sample.Models.{CIAMaterialConfig, MaterialConfig}
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.{FileStatus, FileSystem, FileUtil, Path}
 import org.apache.spark.sql.hive.HiveContext
+import org.slf4j.LoggerFactory
 
 object MaterializationCloseDown {
 
