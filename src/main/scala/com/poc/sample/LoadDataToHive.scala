@@ -132,6 +132,7 @@ object LoadDataToHive {
     else {
       decimalTypeString match {
         case "integer" => AdditionalFields("int", null, 0, 0)
+        case "binary" => AdditionalFields("bytes", null, 0, 0)
         case others => AdditionalFields(decimalTypeString, null, 0, 0)
       }
     }
@@ -229,6 +230,7 @@ object LoadDataToHive {
           .drop(colName + "_i")
           .withColumnRenamed(colName + "_j", colName)
     }
+
     val upsertedColumns = upsertDataFrame.columns
     val additionalColumns = upsertedColumns diff columns
     val materializedDataframe = additionalColumns.foldLeft(upsertDataFrame) {

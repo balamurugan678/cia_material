@@ -19,8 +19,14 @@ object IncrementalTableSetUp {
 
   def loadIncrementalData(hadoopFileSystem: FileSystem, hadoopConfig: Configuration, materialConfig: MaterialConfig, ciaMaterialConfig: CIAMaterialConfig, hiveContext: HiveContext, controlFields: Seq[String]): Try[String] = {
 
-    if (materialConfig.createIncrementalTable)
+    if (materialConfig.incrementalHiveTableExist){
+      if(materialConfig.createBaseTable){
+        val incrementalDataSchema = hiveContext.table(materialConfig.incrementalTableName).schema
+        createBaseTable(materialConfig, hiveContext, incrementalDataSchema, controlFields)
+      }
       return Success("Success")
+    }
+
 
     val hiveDatabase = materialConfig.hiveDatabase
     val baseTableName = materialConfig.baseTableName
@@ -54,6 +60,7 @@ object IncrementalTableSetUp {
 
       val schemaString = rawSchema.fields.map(field => field.name.toLowerCase().replaceAll("""^_""", "").concat(" ").concat(field.dataType.typeName match {
         case "integer" | "Long" | "long" => "bigint"
+        case "binary" => "bytes"
         case others => others
       })).mkString(",")
       val avroSchemaString: String = buildAvroSchema(hiveDatabase, rawSchema, baseTableName)
@@ -62,7 +69,7 @@ object IncrementalTableSetUp {
       hiveContext.sql(s"DROP TABLE IF EXISTS $incrementalTableName")
       val incrementalExtTable =
         s"""
-           |Create external table $incrementalTableName ($schemaString)\n
+           |Create external table $incrementalTableName \n
            |ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.avro.AvroSerDe' \n
            | Stored As Avro \n
            |-- inputformat 'org.apache.hadoop.hive.ql.io.avro.AvroContainerInputFormat' \n
@@ -128,6 +135,7 @@ object IncrementalTableSetUp {
     else {
       decimalTypeString match {
         case "integer" => AdditionalFields("int", null, 0, 0)
+        case "binary" => AdditionalFields("bytes", null, 0, 0)
         case others => AdditionalFields(decimalTypeString, null, 0, 0)
       }
     }

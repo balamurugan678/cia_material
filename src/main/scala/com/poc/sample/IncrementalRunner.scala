@@ -64,7 +64,7 @@ object IncrementalRunner {
     IncrementalTableSetUp.loadIncrementalData(hadoopFileSystem, hadoopConfig, matConfig, ciaMaterialConfig, hiveContext, controlFields) match {
       case Success(success) => {
         val ciaNotification = LoadDataToHive.reconcile(matConfig, partitionColumns, uniqueKeyList, mandatoryMetaData, hiveContext)
-        if (!materialConfig.createIncrementalTable)
+        if (!materialConfig.incrementalHiveTableExist)
           MaterializationCloseDown.dropIncrementalExtTable(matConfig, hiveContext)
         MaterializationCloseDown.moveFilesToProcessedDirectory(matConfig, ciaMaterialConfig, hadoopConfig, hadoopFileSystem)
         logger.warn(s"Materialization finished at ${LocalDateTime.now} for the table ${matConfig.baseTableName} and the clean up happened!!!")
@@ -82,7 +82,7 @@ object IncrementalRunner {
   def findAndOverrideProperties(materialConfig: MaterialConfig, ciaMaterialConfig: CIAMaterialConfig) = {
     val matConfig = ciaMaterialConfig.overrideIndicator match {
       case "Y" =>
-        materialConfig.copy(createBaseTable = ciaMaterialConfig.createBaseTable, createIncrementalTable = ciaMaterialConfig.createIncrementalTable, seqColumn = ciaMaterialConfig.seqColumn,
+        materialConfig.copy(createBaseTable = ciaMaterialConfig.createBaseTable, incrementalHiveTableExist = ciaMaterialConfig.incrementalHiveTableExist, seqColumn = ciaMaterialConfig.seqColumn,
           headerOperation = ciaMaterialConfig.headerOperation, deleteIndicator = ciaMaterialConfig.deleteIndicator, beforeImageIndicator = ciaMaterialConfig.beforeImageIndicator,
           mandatoryMetaData = ciaMaterialConfig.mandatoryMetaData)
       case _ => materialConfig

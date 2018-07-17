@@ -7,11 +7,11 @@ object Models {
 
   case class CIAMaterialConfig(appName: String, environment: String, kerberosPrincipal: String, kerberosKeyTabLocation: String, esStatusIndicator: Boolean, esHost: String,
                                esPort: String, esIndex: String, attunityCDCIndicator: Boolean, cdcJournalControlFields: String,
-                               createBaseTable: Boolean, createIncrementalTable: Boolean, seqColumn: String, headerOperation: String, deleteIndicator: String,
+                               createBaseTable: Boolean, incrementalHiveTableExist: Boolean, seqColumn: String, headerOperation: String, deleteIndicator: String,
                                beforeImageIndicator: String, mandatoryMetaData: String, overrideIndicator: String, materialConfigs: List[MaterialConfig]
                               )
 
-  case class MaterialConfig(hiveDatabase: String, baseTableName: String, createBaseTable: Boolean, createIncrementalTable: Boolean, incrementalTableName: String,
+  case class MaterialConfig(hiveDatabase: String, baseTableName: String, createBaseTable: Boolean, incrementalHiveTableExist: Boolean, incrementalTableName: String,
                             pathToLoad: String, attunityUnpackedPath: String, attunityUnpackedArchive: String,
                             processedPathToMove: String, uniqueKeyList: String, partitionColumns: String, seqColumn: String,
                             headerOperation: String, deleteIndicator: String, beforeImageIndicator: String, mandatoryMetaData: String)
