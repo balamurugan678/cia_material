@@ -10,9 +10,9 @@ object AttunityDataUnpack {
 
   def unPackEncapsulatedAttunityMessage(hadoopFileSystem: FileSystem, hadoopConfig: Configuration, hiveContext: HiveContext, pathToLoad: String, attunityUnpackedFilePath: String, attunityProcessedFilePath: String): Unit = {
 
-    val dataColumns = Seq("data.*")
-    val beforeDataColumns = Seq("beforeData.*")
-    val headerColumns = Seq("headers.*")
+    val dataColumns = Seq("message.data.*")
+    val beforeDataColumns = Seq("message.beforeData.*")
+    val headerColumns = Seq("message.headers.*")
 
     val sourceFiles = hadoopFileSystem.listStatus(new Path(pathToLoad))
     sourceFiles.foreach(sourceFile => {

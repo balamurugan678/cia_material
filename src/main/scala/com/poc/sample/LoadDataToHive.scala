@@ -51,7 +51,8 @@ object LoadDataToHive {
 
   def materializeWithLatestVersion(hiveDatabase: String, baseTableName: String, incrementalTableName: String, uniqueKeyList: Seq[String], partitionColumnList: Seq[String], seqColumn: String, hiveContext: HiveContext, incrementalDataframe: DataFrame, partitionColumns: String, headerOperation: String, deleteIndicator: String, beforeImageIndicator: String, mandatoryMetaData: Seq[String], materialConfig: MaterialConfig): String = {
 
-    createBaseVersionTable(baseTableName, hiveContext)
+    createBaseVersionTable(hiveDatabase, baseTableName, hiveContext)
+    hiveContext.sql(s"use ${materialConfig.hiveDatabase}")
     val baseDataFrame = if (partitionColumns.isEmpty) {
       val baseTableDataframe = hiveContext.table(baseTableName)
       val fieldList = scala.collection.mutable.MutableList[BaseAvroSchema]()
@@ -103,11 +104,13 @@ object LoadDataToHive {
   }
 
 
-  def createBaseVersionTable(baseTableName: String, hiveContext: HiveContext) = {
+  def createBaseVersionTable(hiveDatabase: String, baseTableName: String, hiveContext: HiveContext) = {
     val initialTableDataframe = hiveContext.table(baseTableName)
     initialTableDataframe.registerTempTable("temptable")
-    hiveContext.sql(s"DROP TABLE IF EXISTS ${baseTableName + "_" + DateTimeFormatter.ofPattern("yyyyMMdd").format(LocalDate.now)}")
-    hiveContext.sql(s"CREATE TABLE IF NOT EXISTS ${baseTableName + "_" + DateTimeFormatter.ofPattern("yyyyMMdd").format(LocalDate.now)} as select * from temptable")
+    hiveContext.sql(s"DROP DATABASE IF EXISTS ${hiveDatabase + "_" + DateTimeFormatter.ofPattern("yyyyMMdd").format(LocalDate.now)} CASCADE")
+    hiveContext.sql(s"CREATE DATABASE IF NOT EXISTS ${hiveDatabase + "_" + DateTimeFormatter.ofPattern("yyyyMMdd").format(LocalDate.now)}")
+    hiveContext.sql(s"use ${hiveDatabase + "_" + DateTimeFormatter.ofPattern("yyyyMMdd").format(LocalDate.now)}")
+    hiveContext.sql(s"CREATE TABLE IF NOT EXISTS $baseTableName as select * from temptable")
     initialTableDataframe
   }
 
