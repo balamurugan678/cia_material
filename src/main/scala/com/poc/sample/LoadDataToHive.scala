@@ -107,9 +107,9 @@ object LoadDataToHive {
   def createBaseVersionTable(hiveDatabase: String, baseTableName: String, hiveContext: HiveContext) = {
     val initialTableDataframe = hiveContext.table(baseTableName)
     initialTableDataframe.registerTempTable("temptable")
-    hiveContext.sql(s"DROP DATABASE IF EXISTS ${hiveDatabase + "_" + DateTimeFormatter.ofPattern("yyyyMMdd").format(LocalDate.now)} CASCADE")
     hiveContext.sql(s"CREATE DATABASE IF NOT EXISTS ${hiveDatabase + "_" + DateTimeFormatter.ofPattern("yyyyMMdd").format(LocalDate.now)}")
     hiveContext.sql(s"use ${hiveDatabase + "_" + DateTimeFormatter.ofPattern("yyyyMMdd").format(LocalDate.now)}")
+    hiveContext.sql(s"DROP TABLE IF EXISTS $baseTableName")
     hiveContext.sql(s"CREATE TABLE IF NOT EXISTS $baseTableName as select * from temptable")
     initialTableDataframe
   }
