@@ -19,10 +19,10 @@ object IncrementalTableSetUp {
 
   def loadIncrementalData(hadoopFileSystem: FileSystem, hadoopConfig: Configuration, materialConfig: MaterialConfig, ciaMaterialConfig: CIAMaterialConfig, hiveContext: HiveContext, controlFields: Seq[String]): Try[String] = {
 
-    if (materialConfig.incrementalHiveTableExist){
-      if(materialConfig.createBaseTable){
+    if (materialConfig.incrementalHiveTableExist) {
+      if (materialConfig.createBaseTable) {
         val incrementalDataSchema = hiveContext.table(materialConfig.incrementalTableName).schema
-        createBaseTable(materialConfig, hiveContext, incrementalDataSchema, controlFields)
+        createBaseTable(ciaMaterialConfig, materialConfig, hiveContext, incrementalDataSchema, controlFields)
       }
       return Success("Success")
     }
@@ -54,17 +54,11 @@ object IncrementalTableSetUp {
         .load(incrementalFilesPathToLoad)
 
       val rawSchema = incrementalData.schema
-
       if (shouldCreateBaseTable)
-        createBaseTable(materialConfig, hiveContext, rawSchema, controlFields)
+        createBaseTable(ciaMaterialConfig, materialConfig, hiveContext, rawSchema, controlFields)
 
-      val schemaString = rawSchema.fields.map(field => field.name.toLowerCase().replaceAll("""^_""", "").concat(" ").concat(field.dataType.typeName match {
-        case "integer" | "Long" | "long" => "bigint"
-        case "binary" => "bytes"
-        case others => others
-      })).mkString(",")
       val avroSchemaString: String = buildAvroSchema(hiveDatabase, rawSchema, baseTableName)
-
+      val avroSchemaPath = writeSchemaFile(ciaMaterialConfig.schemaDirectory, hiveDatabase, incrementalTableName, avroSchemaString)
       hiveContext.sql(s"USE $hiveDatabase")
       hiveContext.sql(s"DROP TABLE IF EXISTS $incrementalTableName")
       val incrementalExtTable =
@@ -75,7 +69,7 @@ object IncrementalTableSetUp {
            |-- inputformat 'org.apache.hadoop.hive.ql.io.avro.AvroContainerInputFormat' \n
            | -- outputformat 'org.apache.hadoop.hive.ql.io.avro.AvroContainerOutputFormat' \n
            |LOCATION '$incrementalFilesPathToLoad' \n
-           |TBLPROPERTIES('avro.schema.literal' = '$avroSchemaString')
+           |TBLPROPERTIES('avro.schema.url' = '$avroSchemaPath')
        """.stripMargin
       hiveContext.sql(incrementalExtTable)
       logger.warn(s"Incremental external table has been created with the name ${incrementalTableName} and the delta files have been loaded from ${pathToLoad}")
@@ -86,7 +80,19 @@ object IncrementalTableSetUp {
     }
   }
 
-  def createBaseTable(materialConfig: MaterialConfig, hiveContext: HiveContext, rawSchema: StructType, controlFields: Seq[String]): Try[String] = {
+  def writeSchemaFile(schemaDirectory: String, hiveDatabase: String, fileName: String, schemaString: String): String = {
+    val schemaPath = if (schemaDirectory.endsWith("/")) schemaDirectory else schemaDirectory + "/"
+    val writer = new PrintWriter(new File(schemaPath + fileName + ".avsc"))
+    try {
+      writer.write(schemaString)
+    }
+    finally {
+      writer.close()
+    }
+    "file://" + schemaPath + fileName + ".avsc"
+  }
+
+  def createBaseTable(ciaMaterialConfig: CIAMaterialConfig, materialConfig: MaterialConfig, hiveContext: HiveContext, rawSchema: StructType, controlFields: Seq[String]): Try[String] = {
     val hiveDatabase = materialConfig.hiveDatabase
     val baseTableName = materialConfig.baseTableName
     val controlFieldsToRemove = controlFields.filter(field => !materialConfig.mandatoryMetaData.contains(field.toLowerCase))
@@ -96,6 +102,7 @@ object IncrementalTableSetUp {
 
     try {
       val baseTableSchemaAsString = buildBaseTableAvroSchema(hiveDatabase, baseTableSchemaFields, baseTableName)
+      val avroSchemaPath = writeSchemaFile(ciaMaterialConfig.schemaDirectory, hiveDatabase, baseTableName, baseTableSchemaAsString)
       hiveContext.sql(s"USE $hiveDatabase")
       hiveContext.sql(s"DROP TABLE IF EXISTS $baseTableName")
       val baseTable =
@@ -105,7 +112,7 @@ object IncrementalTableSetUp {
            | Stored As Avro \n
            |-- inputformat 'org.apache.hadoop.hive.ql.io.avro.AvroContainerInputFormat' \n
            | -- outputformat 'org.apache.hadoop.hive.ql.io.avro.AvroContainerOutputFormat' \n
-           |TBLPROPERTIES('avro.schema.literal' = '$baseTableSchemaAsString')
+           |TBLPROPERTIES('avro.schema.url' = '$avroSchemaPath')
        """.stripMargin
       hiveContext.sql(baseTable)
       logger.debug(s"Base external table has been created with the name ${baseTable}")

@@ -22,22 +22,22 @@ object LoadDataToHive {
 
   val logger = LoggerFactory.getLogger(LoadDataToHive.getClass)
 
-  def reconcile(materialConfig: MaterialConfig, partitionColumnList: Seq[String], uniqueKeyList: Seq[String], mandatoryMetaData: Seq[String], hiveContext: HiveContext): CIANotification = {
+  def reconcile(materialConfig: MaterialConfig, ciaMaterialConfig: CIAMaterialConfig, partitionColumnList: Seq[String], uniqueKeyList: Seq[String], mandatoryMetaData: Seq[String], hiveContext: HiveContext): CIANotification = {
 
     hiveContext.sql(s"use ${materialConfig.hiveDatabase}")
     val incrementalDataframe = hiveContext.table(materialConfig.incrementalTableName)
     val incrementalUBFreeDataframe = incrementalDataframe.filter(not(incrementalDataframe(materialConfig.headerOperation) <=> materialConfig.beforeImageIndicator))
 
     val partitionColumns = partitionColumnList.mkString(",")
-    val currentTimestamp = materializeWithLatestVersion(materialConfig.hiveDatabase, materialConfig.baseTableName, materialConfig.incrementalTableName, uniqueKeyList, partitionColumnList, materialConfig.seqColumn, hiveContext, incrementalDataframe, partitionColumns, materialConfig.headerOperation, materialConfig.deleteIndicator, materialConfig.beforeImageIndicator, mandatoryMetaData, materialConfig)
-    val notification: CIANotification = buildNotificationObject(materialConfig.pathToLoad, materialConfig.hiveDatabase, materialConfig.baseTableName, materialConfig.seqColumn, incrementalUBFreeDataframe, currentTimestamp)
+    val materializerResult = materializeWithLatestVersion(materialConfig.hiveDatabase, materialConfig.baseTableName, materialConfig.incrementalTableName, uniqueKeyList, partitionColumnList, materialConfig.seqColumn, hiveContext, incrementalDataframe, partitionColumns, materialConfig.headerOperation, materialConfig.deleteIndicator, materialConfig.beforeImageIndicator, mandatoryMetaData, materialConfig)
+    val notification: CIANotification = buildNotificationObject(ciaMaterialConfig.sourceName, materialConfig.pathToLoad, materialConfig.hiveDatabase, materialConfig.baseTableName, materialConfig.seqColumn, incrementalUBFreeDataframe, materializerResult._1, materializerResult._2)
     notification
   }
 
 
-  def buildNotificationObject(pathToLoad: String, hiveDatabase: String, baseTableName: String, seqColumn: String, incrementalDataframe: DataFrame, currentTimestamp: String) = {
+  def buildNotificationObject(sourceName: String, pathToLoad: String, hiveDatabase: String, baseTableName: String, seqColumn: String, incrementalDataframe: DataFrame, noOfRecords: Long, currentTimestamp: String) = {
     val latestTimeStamp = findLatestTSInRecords(seqColumn, incrementalDataframe)
-    val notification = CIANotification(hiveDatabase, baseTableName, pathToLoad, latestTimeStamp, currentTimestamp)
+    val notification = CIANotification(sourceName, "Materializer", hiveDatabase, baseTableName, pathToLoad, latestTimeStamp, currentTimestamp, noOfRecords, null)
     notification
   }
 
@@ -49,7 +49,7 @@ object LoadDataToHive {
 
   def hasColumn(df: DataFrame, path: String) = Try(df(path)).isSuccess
 
-  def materializeWithLatestVersion(hiveDatabase: String, baseTableName: String, incrementalTableName: String, uniqueKeyList: Seq[String], partitionColumnList: Seq[String], seqColumn: String, hiveContext: HiveContext, incrementalDataframe: DataFrame, partitionColumns: String, headerOperation: String, deleteIndicator: String, beforeImageIndicator: String, mandatoryMetaData: Seq[String], materialConfig: MaterialConfig): String = {
+  def materializeWithLatestVersion(hiveDatabase: String, baseTableName: String, incrementalTableName: String, uniqueKeyList: Seq[String], partitionColumnList: Seq[String], seqColumn: String, hiveContext: HiveContext, incrementalDataframe: DataFrame, partitionColumns: String, headerOperation: String, deleteIndicator: String, beforeImageIndicator: String, mandatoryMetaData: Seq[String], materialConfig: MaterialConfig): (Long, String) = {
 
     createBaseVersionTable(hiveDatabase, baseTableName, hiveContext)
     hiveContext.sql(s"use ${materialConfig.hiveDatabase}")
@@ -96,11 +96,12 @@ object LoadDataToHive {
 
     logger.warn(s"Upserted data have been found for the table ${baseTableName} and the hive tables would be loaded now")
     val currentTimestamp = if (partitionColumns.isEmpty) {
+      upsertDataframe.show()
       writeUpsertDataBackToBaseTableWithoutPartitions(hiveDatabase, baseTableName, "overwrite", upsertDataframe, hiveContext)
     } else {
       writeUpsertDataBackToBasePartitions(hiveDatabase, baseTableName, partitionColumns, "overwrite", upsertDataframe)
     }
-    currentTimestamp
+    (upsertDataframe.count(), currentTimestamp)
   }
 
 

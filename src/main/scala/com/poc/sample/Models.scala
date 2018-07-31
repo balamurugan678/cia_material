@@ -5,8 +5,8 @@ import com.fasterxml.jackson.annotation.{JsonInclude, JsonProperty}
 
 object Models {
 
-  case class CIAMaterialConfig(appName: String, environment: String, kerberosPrincipal: String, kerberosKeyTabLocation: String, esStatusIndicator: Boolean, esHost: String,
-                               esPort: String, esIndex: String, attunityCDCIndicator: Boolean, cdcJournalControlFields: String,
+  case class CIAMaterialConfig(appName: String, environment: String, sourceName: String, kerberosPrincipal: String, kerberosKeyTabLocation: String, esStatusIndicator: Boolean, esHost: String,
+                               esPort: String, esIndex: String, schemaDirectory: String, attunityCDCIndicator: Boolean, cdcJournalControlFields: String,
                                createBaseTable: Boolean, incrementalHiveTableExist: Boolean, seqColumn: String, headerOperation: String, deleteIndicator: String,
                                beforeImageIndicator: String, mandatoryMetaData: String, overrideIndicator: String, materialConfigs: List[MaterialConfig]
                               )
@@ -18,7 +18,11 @@ object Models {
 
   case class Item(id: String, name: String)
 
-  case class CIANotification(hiveDatabase: String, baseTableName: String, incrementalPathLocation: String, latestTimestamp: String, currentTimestamp: String)
+  case class CIANotification(sourceName: String, componentName: String, hiveDatabase: String, baseTableName: String, incrementalPathLocation: String, latestTimestamp: String, currentTimestamp: String, noOfRecords: Long, timeTaken: String) {
+    override def toString = "Source Name = " + sourceName + "Component Name =" + componentName + "Hive database = " + hiveDatabase + "Base Table name = " + baseTableName +
+      "Incremental Path =" + incrementalPathLocation + "Latest timestamp in Records =" + latestTimestamp + "Current Timestamp = " + currentTimestamp +
+      "No of Records " + noOfRecords + "Time taken " + timeTaken
+  }
 
   case class AvroSchema(@JsonProperty("type") typz: String, name: String, namespace: String, fields: Array[Fields])
 

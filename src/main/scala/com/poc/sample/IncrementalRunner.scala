@@ -33,7 +33,7 @@ object IncrementalRunner {
 
     keyTabRefresh(ciaMaterialConfig, hadoopConfig)
 
-    ciaMaterialConfig.materialConfigs.par.foreach(materialConfig => {
+    ciaMaterialConfig.materialConfigs.foreach(materialConfig => {
       materializeTable(hadoopConfig, hadoopFileSystem, sparkContext, hiveContext, materialConfig, journalControlFields, ciaMaterialConfig.esStatusIndicator, ciaMaterialConfig)
     })
 
@@ -60,16 +60,22 @@ object IncrementalRunner {
     val mandatoryMetaData = matConfig.mandatoryMetaData.split('|').toSeq
     val controlFields: Seq[String] = journalControlFields.split('|').toSeq.map(_.toLowerCase)
 
+
     logger.warn(s"Materialization started at ${LocalDateTime.now} for the table ${matConfig.baseTableName} and the delta files would be picked from ${matConfig.pathToLoad}")
+    val startTimeMills = System.currentTimeMillis()
     IncrementalTableSetUp.loadIncrementalData(hadoopFileSystem, hadoopConfig, matConfig, ciaMaterialConfig, hiveContext, controlFields) match {
       case Success(success) => {
-        val ciaNotification = LoadDataToHive.reconcile(matConfig, partitionColumns, uniqueKeyList, mandatoryMetaData, hiveContext)
+        val ciaNotification = LoadDataToHive.reconcile(matConfig, ciaMaterialConfig, partitionColumns, uniqueKeyList, mandatoryMetaData, hiveContext)
         if (!materialConfig.incrementalHiveTableExist)
           MaterializationCloseDown.dropIncrementalExtTable(matConfig, hiveContext)
         MaterializationCloseDown.moveFilesToProcessedDirectory(matConfig, ciaMaterialConfig, hadoopConfig, hadoopFileSystem)
         logger.warn(s"Materialization finished at ${LocalDateTime.now} for the table ${matConfig.baseTableName} and the clean up happened!!!")
+        val endTimeMills = System.currentTimeMillis()
+        val durationSeconds = (endTimeMills - startTimeMills) / 1000
+        val finalCIANotification = ciaNotification.copy(timeTaken = durationSeconds.toString)
         if (esStatusIndicator)
-          MaterializationNotification.persistNotificationInES(sparkContext, ciaNotification)
+          MaterializationNotification.persistNotificationInES(sparkContext, finalCIANotification)
+        logger.warn(s"Notification is: $finalCIANotification")
       }
       case Failure(ex) => {
         ex match {
