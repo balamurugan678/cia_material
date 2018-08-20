@@ -86,12 +86,14 @@ object IncrementalRunner {
   }
 
   def findAndOverrideProperties(materialConfig: MaterialConfig, ciaMaterialConfig: CIAMaterialConfig) = {
-    val matConfig = ciaMaterialConfig.overrideIndicator match {
-      case "Y" =>
-        materialConfig.copy(createBaseTable = ciaMaterialConfig.createBaseTable, incrementalHiveTableExist = ciaMaterialConfig.incrementalHiveTableExist, seqColumn = ciaMaterialConfig.seqColumn,
-          headerOperation = ciaMaterialConfig.headerOperation, deleteIndicator = ciaMaterialConfig.deleteIndicator, beforeImageIndicator = ciaMaterialConfig.beforeImageIndicator,
-          mandatoryMetaData = ciaMaterialConfig.mandatoryMetaData)
-      case _ => materialConfig
+    val matConfig = if (ciaMaterialConfig.overrideIndicator) {
+      materialConfig.copy(createBaseTable = ciaMaterialConfig.createBaseTable, createBaseTableFromScooped = ciaMaterialConfig.createBaseTableFromScooped,
+        incrementalHiveTableExist = ciaMaterialConfig.incrementalHiveTableExist, seqColumn = ciaMaterialConfig.seqColumn,
+        headerOperation = ciaMaterialConfig.headerOperation, deleteIndicator = ciaMaterialConfig.deleteIndicator, beforeImageIndicator = ciaMaterialConfig.beforeImageIndicator,
+        mandatoryMetaData = ciaMaterialConfig.mandatoryMetaData)
+    }
+    else {
+      materialConfig
     }
     matConfig
   }
